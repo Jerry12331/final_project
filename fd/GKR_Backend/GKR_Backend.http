@@ -1,0 +1,6 @@
+@GKR_Backend_HostAddress = http://localhost:5285
+
+GET {{GKR_Backend_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
