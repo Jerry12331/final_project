@@ -1,21 +1,21 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import ChatPage from '../page/ChatPage.vue'
-import InputPage from '../page/InputPage.vue'
+import { createRouter, createWebHistory } from "vue-router";
+import InputPage from "../pages/InputPage.vue";
+import ChatPage from "../pages/ChatPage.vue";
 
 const routes = [
-  { path: '/', name: 'chat', component: ChatPage },
-  { path: '/input', name: 'input', component: InputPage }
-]
+  {
+    path: "/",
+    component: InputPage
+  },
+  {
+    path: "/chat",
+    component: ChatPage
+  }
+];
 
-const router = createRouter({ history: createWebHistory(), routes })
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+});
 
-// 通过 provide/inject 传递全局数据
-let gkrResult = null
-
-export const setGkrResult = (result) => {
-  gkrResult = result
-}
-
-export const getGkrResult = () => gkrResult
-
-export default router
+export default router;

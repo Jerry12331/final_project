@@ -1,12 +1,16 @@
 <template>
-  <div class="header" style="position:sticky;top:0;z-index:10">
+  <div class="header">
     <slot />
   </div>
 </template>
 
-<script setup>
-</script>
-
 <style scoped>
-.header{ display:flex; align-items:center; justify-content:space-between }
+.header {
+  position: sticky;
+  top: 0;
+  background: white;
+  padding: 12px;
+  border-bottom: 1px solid #ddd;
+  z-index: 10;
+}
 </style>

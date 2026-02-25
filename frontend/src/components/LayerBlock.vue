@@ -1,18 +1,22 @@
 <template>
-  <div class="layer-block">
-    <header>{{ title }}</header>
-    <div class="content">
-      <slot />
+  <div class="border rounded shadow">
+    <div
+      class="bg-gray-100 px-4 py-2 cursor-pointer flex justify-between items-center"
+      @click="$emit('toggle')"
+    >
+      <span>{{ title }}</span>
+      <span>{{ open ? "▼" : "►" }}</span>
+    </div>
+
+    <div v-if="open" class="p-2">
+      <slot></slot>
     </div>
   </div>
 </template>
 
 <script setup>
-import { defineProps } from 'vue'
-const props = defineProps({ title: { type: String, default: 'Layer' } })
+defineProps({
+  title: String,
+  open: Boolean
+});
 </script>
-
-<style scoped>
-.layer-block{ border:1px solid #e5e7eb; padding:8px; border-radius:6px; background:white }
-.layer-block header{ font-weight:600; margin-bottom:6px }
-</style>

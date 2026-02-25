@@ -1,15 +1,17 @@
 <template>
-  <div :class="['chat-bubble', { 'from-me': fromMe }]">
-    <slot />
+  <div
+    :class="[
+      'p-3 my-2 rounded-lg max-w-[70%] shadow',
+      side === 'left' ? 'bg-gray-200 ml-0' : 'bg-blue-200 ml-auto text-right'
+    ]"
+  >
+    {{ text }}
   </div>
 </template>
 
 <script setup>
-import { defineProps } from 'vue'
-const props = defineProps({ fromMe: { type: Boolean, default: false } })
+defineProps({
+  text: String,
+  side: String  // 'left' or 'right'
+});
 </script>
-
-<style scoped>
-.chat-bubble{ max-width:70%; }
-.chat-bubble.from-me{ background: #3b82f6; color: white; }
-</style>
