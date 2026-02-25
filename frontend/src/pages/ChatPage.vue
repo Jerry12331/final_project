@@ -69,101 +69,160 @@
 
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { useRoute } from "vue-router";
 import CircuitCanvas from "../components/CircuitCanvas.vue";
 
+const route = useRoute();
 const currentStep = ref(0);
+const currentLayer = ref(0);
 
-// ✅ 核心資料結構：每個 Layer 有自己的 Sumcheck
 const protocolState = ref({
-  currentLayer: 2,
-  layers: [
-    {
-      layerIndex: 0,
-      isOpen: false,
-      sumcheck: {
-        boundary: "Layer 0 (output layer)",
-        rounds: [
-          {
-            round: 1,
-            verifier: "Sumcheck 完成，請給我最後 gate value",
-            prover: "最終 gate value = 42"
-          }
-        ]
-      }
-    },
-    {
-      layerIndex: 1,
-      isOpen: false,
-      sumcheck: {
-        boundary: "Layer 1",
-        rounds: [
-          {
-            round: 1,
-            verifier: "請給我下一個隨機 r",
-            prover: "r = 7"
-          },
-          {
-            round: 2,
-            verifier: "驗證這一層的多項式",
-            prover: "g2(t) = 2t^2 + 3"
-          }
-        ]
-      }
-    },
-    {
-      layerIndex: 2,
-      isOpen: true, // 預設打開
-      sumcheck: {
-        boundary: "Layer 2",
-        rounds: [
-          {
-            round: 1,
-            verifier: "你現在在哪一層？送我 boundary!",
-            prover: "目前在 Layer 2，這是 boundary。"
-          },
-          {
-            round: 2,
-            verifier: "給我 g1(t) 多項式",
-            prover: "g1(t) = 5 + 3t"
-          },
-          {
-            round: 3,
-            verifier: "請給我這一輪的隨機挑戰",
-            prover: "r1 = 0.42"
-          }
-        ]
-      }
-    }
-  ]
+  currentLayer: 0,
+  layers: []
 });
 
-const currentLayer = ref(2);
+onMounted(async () => {
+  try {
+    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0,1],[1,0]];
+    const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
 
-// 計算總步數（所有 rounds 加總）
+    // 將此處換成您實際的網址與埠號
+    const response = await fetch("http://localhost:5285/api/run_gkr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        circuit: circuitData,
+        inputs: inputData
+      })
+    });
+
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    
+    // 💡 印出 C# 傳來的原始資料，如果您發現對話框文字怪怪的，可以來這裡看
+    console.log("C# 回傳的原始 Log:", data.log);
+    
+    parseBackendLogs(data.log);
+
+  } catch (error) {
+    console.error("GKR API Error:", error);
+    alert("與後端連線失敗，請檢查 C# 伺服器是否開啟。\n" + error.message);
+  }
+});
+
+// 解析 C# Log，轉換為對話框結構
+function parseBackendLogs(logs) {
+  let parsedLayers = [];
+  let currentLayerObj = null;
+  let currentRoundObj = null;
+  let roundCounter = 1;
+  let layerIdx = 0;
+
+  for (let line of logs) {
+    // 偵測是否換層
+    if (line.includes("Setting up Circuit") || line.includes("send D()")) {
+      if (currentRoundObj && currentLayerObj) {
+          currentLayerObj.sumcheck.rounds.push(currentRoundObj);
+          currentRoundObj = null;
+      }
+      currentLayerObj = { 
+          layerIndex: layerIdx++, 
+          isOpen: true, 
+          sumcheck: { boundary: "Output Layer", rounds: [] } 
+      };
+      parsedLayers.push(currentLayerObj);
+      roundCounter = 1;
+    } else if (line.includes("sum check start")) {
+      if (currentRoundObj && currentLayerObj) {
+          currentLayerObj.sumcheck.rounds.push(currentRoundObj);
+          currentRoundObj = null;
+      }
+      currentLayerObj = { 
+          layerIndex: layerIdx++, 
+          isOpen: true, 
+          sumcheck: { boundary: `Layer ${layerIdx-1}`, rounds: [] } 
+      };
+      parsedLayers.push(currentLayerObj);
+      roundCounter = 1;
+    }
+
+    if (!currentLayerObj) {
+        currentLayerObj = { layerIndex: layerIdx++, isOpen: true, sumcheck: { boundary: "System", rounds: [] } };
+        parsedLayers.push(currentLayerObj);
+    }
+
+    // 處理 Prover 與 Verifier 對話
+    if (line.startsWith("P:") || line.startsWith("V:")) {
+      if (!currentRoundObj) {
+          currentRoundObj = { round: roundCounter, verifier: "", prover: "" };
+      }
+      
+      if (line.startsWith("P:")) {
+          currentRoundObj.prover += line.substring(2).trim() + "\n";
+      } else if (line.startsWith("V:")) {
+          currentRoundObj.verifier += line.substring(2).trim() + "\n";
+          // V 講完話，推入這回合
+          currentLayerObj.sumcheck.rounds.push({...currentRoundObj});
+          currentRoundObj = null;
+          roundCounter++;
+      }
+    } else {
+       // 其他系統訊息
+       if (!line.includes("Setting up Circuit") && !line.includes("sum check start")) {
+           if (!currentRoundObj) {
+               currentRoundObj = { round: roundCounter, verifier: "", prover: "" };
+           }
+           currentRoundObj.verifier += `[系統] ${line}\n`;
+       }
+    }
+  }
+  
+  if (currentRoundObj && currentLayerObj) {
+      currentLayerObj.sumcheck.rounds.push(currentRoundObj);
+  }
+
+  // 避免空白資料
+  if (parsedLayers.length === 0 || parsedLayers[0].sumcheck.rounds.length === 0) {
+      parsedLayers = [{
+          layerIndex: 0, 
+          isOpen: true, 
+          sumcheck: { boundary: "GKR 執行紀錄", rounds: [{ round: 1, verifier: "Raw Log", prover: logs.join("\n") }] }
+      }];
+  }
+
+  protocolState.value.layers = parsedLayers;
+  
+  // ⭐️ 修正 1：確保強制從第 0 步開始
+  currentStep.value = 0; 
+}
+
 const totalSteps = computed(() => {
   return protocolState.value.layers.reduce((sum, layer) => {
     return sum + (layer.sumcheck?.rounds.length || 0);
   }, 0);
 });
 
-// 根據 currentStep 決定要顯示到哪一輪
+// ⭐️ 修正 2：計算跨層 (Global) 的目前步驟，讓對話框能正確隨步驟顯示
 function visibleRounds(layer) {
   if (!layer.sumcheck) return [];
   
-  // 簡化版：如果 layer 是打開的，顯示前 N 個 rounds
-  // 後續可以根據 currentStep 來精確控制
-  const visibleCount = Math.min(
-    currentStep.value + 1, 
-    layer.sumcheck.rounds.length
-  );
-  
+  let previousRoundsCount = 0;
+  for (const l of protocolState.value.layers) {
+    if (l.layerIndex === layer.layerIndex) break;
+    previousRoundsCount += l.sumcheck.rounds.length;
+  }
+
+  // 計算屬於「這一層」可顯示的數量
+  const availableStepsForThisLayer = currentStep.value + 1 - previousRoundsCount;
+
+  if (availableStepsForThisLayer <= 0) return []; // 還沒輪到這層
+
+  const visibleCount = Math.min(availableStepsForThisLayer, layer.sumcheck.rounds.length);
   return layer.sumcheck.rounds.slice(0, visibleCount);
 }
 
-// 當前 active 的 layer（用於高亮 circuit）
 const activeLayer = computed(() => {
-  // 簡化：根據 currentStep 計算
   let stepCount = 0;
   for (const layer of protocolState.value.layers) {
     if (!layer.sumcheck) continue;
@@ -177,9 +236,7 @@ const activeLayer = computed(() => {
 
 function toggleLayer(layerIndex) {
   const layer = protocolState.value.layers.find(l => l.layerIndex === layerIndex);
-  if (layer) {
-    layer.isOpen = !layer.isOpen;
-  }
+  if (layer) layer.isOpen = !layer.isOpen;
 }
 
 function nextStep() {
