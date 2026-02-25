@@ -81,6 +81,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import CircuitCanvas from '../components/CircuitCanvas.vue';
+import { getGkrResult } from '../router/index.js';
 
 // --- 狀態管理 ---
 const currentStepIndex = ref(0);
@@ -89,8 +90,12 @@ const isAutoPlaying = ref(false);
 const chatContainer = ref(null);
 let autoPlayInterval = null;
 
+// --- 從 InputPage 接收的 GKR 結果 ---
+let receivedGkrData = null;
+const hasGkrData = ref(false);
+
 // --- Mock Data (模擬後端回傳的完整驗證流程) ---
-const protocolSteps = [
+const protocolSteps = ref([
   { id: 1, speaker: 'prover', type: 'info', layer: 0, message: '我聲稱這個電路的輸出是 <b>15</b>', state: { claim: 15 } },
   { id: 2, speaker: 'verifier', type: 'challenge', layer: 0, message: '收到。開始驗證 Layer 0 -> Layer 1。請證明！', state: { claim: 15 } },
   
@@ -115,29 +120,101 @@ const protocolSteps = [
   
   // Final
   { id: 99, speaker: 'verifier', type: 'success', layer: 3, message: '🎉 驗證成功！所有檢查通過。', state: { claim: 'Pass' } }
-];
+]);
+
+// 初始化時檢查是否有 GKR 結果
+onMounted(() => {
+  receivedGkrData = getGkrResult();
+  if (receivedGkrData) {
+    hasGkrData.value = true;
+    console.log("📥 Received GKR Data in ChatPage:", receivedGkrData);
+    
+    // 根據後端返回的日誌建構協議步驟
+    buildProtocolStepsFromGkrResult(receivedGkrData);
+  }
+});
+
+// 從 GKR 結果建構協議步驟
+const buildProtocolStepsFromGkrResult = (gkrData) => {
+  if (gkrData.apiResult && gkrData.apiResult.log) {
+    const logs = gkrData.apiResult.log;
+    
+    // 清空預設步驟
+    protocolSteps.value = [];
+    
+    // 添加初始化步驟
+    protocolSteps.value.push({
+      id: 0,
+      speaker: 'prover',
+      type: 'info',
+      layer: 0,
+      message: `🔧 電路已初始化 (${gkrData.circuitConfig.num_inputs} 輸入, ${gkrData.circuitConfig.num_layers} 層)`,
+      state: { claim: 'Ready' }
+    });
+    
+    // 將後端日誌轉換為對話步驟
+    logs.forEach((log, idx) => {
+      // 簡單的日誌分類
+      let speaker = 'verifier';
+      let type = 'info';
+      
+      if (log.includes('接收') || log.includes('Received')) {
+        speaker = 'verifier';
+        type = 'challenge';
+      } else if (log.includes('聲稱') || log.includes('Claim')) {
+        speaker = 'prover';
+        type = 'info';
+      } else if (log.includes('checksum') || log.includes('check')) {
+        type = 'check';
+      }
+      
+      protocolSteps.value.push({
+        id: idx + 1,
+        speaker: speaker,
+        type: type,
+        layer: Math.floor(idx / 3) % 4,
+        message: log,
+        state: {}
+      });
+    });
+    
+    // 添加完成步驟
+    protocolSteps.value.push({
+      id: protocolSteps.value.length,
+      speaker: 'verifier',
+      type: 'success',
+      layer: 3,
+      message: '✅ GKR 協議執行完成！',
+      state: { claim: 'Complete' }
+    });
+    
+    console.log("📊 Protocol Steps built:", protocolSteps.value.length, "steps");
+  }
+};
 
 // --- Computed ---
-const totalSteps = protocolSteps.length;
+const totalSteps = computed(() => protocolSteps.value.length);
 
 const visibleSteps = computed(() => {
-  return protocolSteps.slice(0, currentStepIndex.value);
+  return protocolSteps.value.slice(0, currentStepIndex.value);
 });
 
 const currentLayer = computed(() => {
   if (currentStepIndex.value === 0) return 0;
-  return protocolSteps[currentStepIndex.value - 1].layer;
+  if (protocolSteps.value.length === 0) return 0;
+  return protocolSteps.value[currentStepIndex.value - 1]?.layer || 0;
 });
 
 const currentMathState = computed(() => {
   if (currentStepIndex.value === 0) return {};
+  if (protocolSteps.value.length === 0) return {};
   // 總是顯示最新一步的狀態，如果最新一步沒有定義某個欄位，可以往回找(這裡簡化為只看當前)
-  return protocolSteps[currentStepIndex.value - 1].state || {};
+  return protocolSteps.value[currentStepIndex.value - 1]?.state || {};
 });
 
 // --- Methods ---
 const nextStep = () => {
-  if (currentStepIndex.value < totalSteps) {
+  if (currentStepIndex.value < totalSteps.value) {
     currentStepIndex.value++;
     scrollToBottom();
   } else {

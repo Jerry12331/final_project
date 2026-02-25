@@ -92,6 +92,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { setGkrResult } from '../router/index.js';
 
 const router = useRouter();
 
@@ -193,16 +194,74 @@ const serializedData = computed(() => {
   };
 });
 
+// --- 轉換電路格式為後端期望的 int[][] ---
+const convertCircuitFormat = () => {
+  const data = serializedData.value;
+  
+  // 轉換 layers 為 int[][]
+  // 每層開始是操作類型：'ADD' -> 0, 'MUL' -> 1
+  const circuitArray = [];
+  
+  for (let i = 0; i < data.layers.length - 1; i++) { // 排除 Input Layer (最後一層)
+    const layer = data.layers[i];
+    const layerOps = layer.map(gate => {
+      return gate.type === 'ADD' ? 0 : 1; // ADD=0, MUL=1
+    });
+    circuitArray.push(layerOps);
+  }
+  
+  return circuitArray;
+};
+
 // --- 送出 ---
-const submitCircuit = () => {
-  console.log("🚀 Submitting Circuit Data:", serializedData.value);
-  alert("資料已打包送出！請查看 Console (F12)。\n接下來可以跳轉到 ChatPage 開始互動。");
-  
-  // 這裡之後可以串接後端 API
-  // fetch('http://localhost:5000/api/init_circuit', { ... })
-  
-  // 或者直接跳轉 (模擬)
-  // router.push('/chat');
+const submitCircuit = async () => {
+  try {
+    console.log("🚀 Submitting Circuit Data:", serializedData.value);
+    
+    // 準備發送給後端的資料
+    const circuit = convertCircuitFormat();
+    const requestData = {
+      circuit: circuit,
+      inputs: secretInputs.value,
+      mod: 97 // 預設 MOD 值
+    };
+    
+    console.log("📤 Sending to API:", requestData);
+    
+    // 調用後端 API
+    const response = await fetch('http://localhost:5285/api/run_gkr', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    console.log("📥 Response from API:", result);
+    
+    // 保存結果並跳轉到 Chat 頁面
+    const gkrData = {
+      circuitConfig: serializedData.value,
+      apiResult: result,
+      timestamp: new Date().toISOString()
+    };
+    
+    setGkrResult(gkrData);
+    
+    console.log("✅ Jumping to Chat page with data:", gkrData);
+    
+    // 跳轉到 Chat 頁面
+    router.push({ name: 'chat' });
+    
+  } catch (error) {
+    console.error("❌ Error submitting circuit:", error);
+    alert("❌ 提交失敗：" + error.message);
+  }
 };
 
 // 初始化
