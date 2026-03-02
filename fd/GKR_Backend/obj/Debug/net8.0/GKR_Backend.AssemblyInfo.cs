@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GKR_Backend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8426fb513b04da4a861239e2578b8de91ac8420d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3bbcee737dabface64847e8cf577f823f5a39499")]
 [assembly: System.Reflection.AssemblyProductAttribute("GKR_Backend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GKR_Backend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

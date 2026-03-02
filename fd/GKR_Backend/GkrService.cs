@@ -6,33 +6,43 @@ namespace GKR_Backend.Services
 {
     public class GkrService
     {
-        // 用來儲存輸出紀錄
-        private List<string> _logs;
+        // ⭐️ 改用 GkrEvent 串列
+        private List<GkrEvent> _events;
 
-        public List<string> RunGkr(GkrRequest request)
+        private int _currentLayer = 0;
+        private int _currentRound = 1;
+
+        public List<GkrEvent> RunGkr(GkrRequest request)
         {
-            _logs = new List<string>();
+            _events = new List<GkrEvent>();
             try
             {
                 RunProtocolInternal(request);
             }
             catch (Exception ex)
             {
-                _logs.Add($"Error: {ex.Message}");
-                _logs.Add($"StackTrace: {ex.StackTrace}");
+                AddSystemEvent($"Error: {ex.Message}");
+                AddSystemEvent($"StackTrace: {ex.StackTrace}");
             }
-            return _logs;
+            return _events;
         }
 
-        // 輔助 Log 函式，取代 Console.WriteLine
-        private void Log(string msg) => _logs.Add(msg);
-        private void LogWrite(string msg)
+        private void AddProverEvent(string msg)
         {
-            if (_logs.Count > 0)
-                _logs[_logs.Count - 1] += msg;
-            else
-                _logs.Add(msg);
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Prover", Message = msg });
         }
+
+        private void AddVerifierEvent(string msg, bool incrementRound = false)
+        {
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Message = msg });
+            if (incrementRound) _currentRound++;
+        }
+
+        private void AddSystemEvent(string msg)
+        {
+             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "System", Message = msg });
+        }
+
 
         private void RunProtocolInternal(GkrRequest req)
         {
@@ -40,42 +50,35 @@ namespace GKR_Backend.Services
             int[][] rawCircuit = req.Circuit;
             int[] inputs = req.Inputs;
 
-            // 1. 建構電路結構
-            // 注意：前端傳來的 rawCircuit 通常不包含 Input Layer，我們需要手動加上去
-            // rawCircuit[0] 是最上層 (Output)，rawCircuit[最後] 是接到 Input 的層
-
-            int totalLayers = rawCircuit.Length + 1; // +1 是因為還有 Input Layer
+            int totalLayers = rawCircuit.Length + 1;
             Node[][] circuit = new Node[totalLayers][];
 
-            Log($"Setting up Circuit with Mod: {mod}, Layers: {totalLayers}");
+            _currentLayer = 0; 
+            _currentRound = 1; 
+            AddSystemEvent($"Setting up Circuit with Mod: {mod}, Layers: {totalLayers}");
 
-            // A. 初始化每一層的 Nodes
             for (int i = 0; i < totalLayers; i++)
             {
-                if (i == totalLayers - 1) // Input Layer
+                if (i == totalLayers - 1)
                 {
                     circuit[i] = new Node[inputs.Length];
                     for (int j = 0; j < inputs.Length; j++)
                     {
                         circuit[i][j] = new Node(inputs[j], j);
                     }
-                    Log($"Layer {i} (Input): {inputs.Length} gates initialized with values.");
                 }
-                else // Compute Layers (從前端傳來的)
+                else
                 {
                     int[] layerConfig = rawCircuit[i];
                     circuit[i] = new Node[layerConfig.Length];
                     for (int j = 0; j < layerConfig.Length; j++)
                     {
                         circuit[i][j] = new Node(j);
-                        circuit[i][j].set_sign(layerConfig[j]); // 0:+, 1:*
+                        circuit[i][j].set_sign(layerConfig[j]);
                     }
-                    Log($"Layer {i}: {layerConfig.Length} gates initialized.");
                 }
             }
 
-            // B. 自動連接電路 (Binary Tree Structure)
-            // 假設 Layer i 的第 j 個 Gate，連接到 Layer i+1 的 2*j (Left) 和 2*j+1 (Right)
             for (int i = 0; i < totalLayers - 1; i++)
             {
                 for (int j = 0; j < circuit[i].Length; j++)
@@ -90,12 +93,12 @@ namespace GKR_Backend.Services
                     }
                     else
                     {
-                        Log($"Warning: Layer {i} Gate {j} cannot connect to children (Out of bounds). Check input size.");
+                        // ⭐️ 加上防呆機制：如果找不到節點，丟出明確的錯誤，而不是讓程式 NullReferenceException
+                        throw new Exception($"電路結構不合法！第 {i} 層的第 {j} 個 Gate 找不到下一層的輸入（需要 Index {leftIdx} 與 {rightIdx}，但下一層只有 {circuit[i + 1].Length} 個）。請確保輸入矩陣是嚴格的二元樹結構 (例如: 1 -> 2 -> 4)。");
                     }
                 }
             }
 
-            // C. 計算電路數值
             int[] gateNum = new int[totalLayers];
             int[] bitsLen = new int[totalLayers];
 
@@ -113,63 +116,68 @@ namespace GKR_Backend.Services
                 }
             }
 
-            // 2. 執行 GKR 流程 (邏輯直接從原 Program.cs 搬移)
             Prover prover = new Prover(totalLayers, gateNum, bitsLen, mod, circuit);
             Verifier verifier = new Verifier(mod);
 
             int[] fixed_var = new int[bitsLen[0]];
             var claimed_D = prover.claimed_D();
 
+            _currentLayer = 0;
+            _currentRound = 1;
+
             string outputVals = "";
             for (int i = 0; i < gateNum[0]; i++) outputVals += claimed_D(IntToBinary(i, bitsLen[0])) + " ";
-            Log($"P: send D() and the circuit outputs: {outputVals}");
+            AddProverEvent($"send D() and the circuit outputs: {outputVals}");
 
             for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-            Log($"V: send fixed_var = " + string.Join(", ", fixed_var));
+            AddVerifierEvent($"send fixed_var = " + string.Join(", ", fixed_var));
 
             int claimed = claimed_D(fixed_var);
-            Log($"P: claimed D(fixed_var) = {claimed}");
+            AddProverEvent($"claimed D(fixed_var) = {claimed}");
+            
+            _currentRound++; 
 
             for (int now_layer = 0; now_layer < totalLayers - 1; now_layer++)
             {
+                _currentLayer = now_layer + 1; // 為了對齊前端視覺，把 Sumcheck 定義在下一層
+                _currentRound = 1;         
+
                 int maskSum = prover.maskSum(now_layer, fixed_var);
-                Log($"P: send maskSum = {maskSum}");
+                AddProverEvent($"send maskSum = {maskSum}");
+                
                 int rho = verifier.pickRandom();
-                Log($"V: send rho = {rho}");
+                AddVerifierEvent($"send rho = {rho}", incrementRound: true); 
 
                 claimed = Mod(claimed + Mod(rho * maskSum, mod), mod);
-                Log(" sum check start ");
-
+                
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2; i++)
                 {
                     var G = prover.make_G(fixed_var, now_layer, rho);
-                    // Log($"P: send G{i}"); // Optional detail
-                    // Log($"V: Verifying G{i}(0) + G{i}(1) = claimed");
 
                     int term = Mod((long)G(0) + (long)G(1), mod);
                     if (term != claimed)
                     {
-                        Log("V: sum check failed");
+                        AddVerifierEvent("sum check failed (G(0)+G(1) != claimed)");
                         return;
                     }
 
                     int s = verifier.pickRandom();
-                    Log($"V: send s{i} = {s}");
+                    AddVerifierEvent($"send s{i} = {s}");
+                    
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
-                    Log($"P: claimed G{i}(s{i}) = {claimed}");
+                    
+                    AddProverEvent($"claimed G{i}(s{i}) = {claimed}");
+                    _currentRound++; 
 
-                    // 最後一次 sumcheck 的最後一輪
                     if (now_layer == totalLayers - 2 && i == bitsLen[now_layer + 1] * 2 - 1)
                     {
-                        Log("V: construct input layer poly");
                         var input_poly = verifier.make_input(circuit[totalLayers - 1], bitsLen[totalLayers - 1]);
+                        
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        Log($"P: send maskSum with fixed_var = {maskSum}");
+                        AddProverEvent($"send maskSum with fixed_var = {maskSum}");
+                        
                         claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
-                        Log("V: claimed - rho * maskSum");
-
-                        Log("V: sum check final check ");
 
                         int[] a = fixed_var.Take(bitsLen[totalLayers - 2]).ToArray();
                         int[] b = fixed_var.Skip(bitsLen[totalLayers - 2]).Take(bitsLen[totalLayers - 1]).ToArray();
@@ -181,21 +189,24 @@ namespace GKR_Backend.Services
                         long final_part2 = Mod(final_mulPolyVal * Mod(input_poly(b) * input_poly(c), mod), mod);
                         term = Mod(final_part1 + final_part2, mod);
 
-                        if (claimed != term) { Log($"V: final check failed (Claimed {claimed} != Term {term})"); return; }
-                        Log(" sum check passed ");
-                        Log(" Verifier can trust D() ");
+                        if (claimed != term) { 
+                            AddVerifierEvent($"final check failed (Claimed {claimed} != Term {term})"); 
+                            return; 
+                        }
+                        AddVerifierEvent("sum check passed, Verifier can trust D()");
                         break;
                     }
 
-                    if (i == bitsLen[now_layer + 1] * 2 - 1) // Sumcheck 最後一輪
+                    if (i == bitsLen[now_layer + 1] * 2 - 1) 
                     {
                         var claimed_poly = prover.make_q(now_layer, fixed_var);
-                        Log($"P: send claimed_poly q{now_layer + 1}");
+                        AddProverEvent($"send claimed_poly q{now_layer + 1}");
+                        
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        Log($"P: send maskSum = {maskSum}");
+                        AddProverEvent($"send maskSum = {maskSum}");
+                        
                         claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
 
-                        // Final Check logic
                         int[] a = fixed_var.Take(bitsLen[now_layer]).ToArray();
                         int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
                         int[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
@@ -206,11 +217,14 @@ namespace GKR_Backend.Services
                         long part2 = Mod(mulPolyVal * Mod(claimed_poly(0) * claimed_poly(1), mod), mod);
                         term = Mod(part1 + part2, mod);
 
-                        if (claimed != term) { Log("V: intermediate check failed"); return; }
+                        if (claimed != term) { 
+                            AddVerifierEvent("intermediate check failed"); 
+                            return; 
+                        }
 
-                        Log(" sum check passed ");
                         int random_var = verifier.pickRandom();
-                        Log($"V: send r{now_layer + 1} = {random_var}");
+                        AddVerifierEvent($"sum check passed. send r{now_layer + 1} = {random_var}", incrementRound: true);
+                        
                         claimed = claimed_poly(random_var);
 
                         var l_poly = prover.make_l(now_layer, fixed_var);
@@ -223,11 +237,6 @@ namespace GKR_Backend.Services
                 }
             }
         }
-
-        // ==========================================
-        // 以下為複製自 Program.cs 的靜態方法與類別
-        // 稍微調整修飾詞以符合 Class 結構
-        // ==========================================
 
         private static int[] IntToBinary(int n, int len)
         {
@@ -313,29 +322,16 @@ namespace GKR_Backend.Services
             };
         }
 
-        // 內部類別 (需設為 public 或不用調整，因為都在 Service 內)
         class Node
         {
             public int? value;
-            public int sign; // 0: + , 1: -
+            public int sign;
             public Node left;
             public Node right;
             public int index;
 
-            public Node(int index)
-            {
-                this.index = index;
-                this.value = null;
-                this.left = null;
-                this.right = null;
-            }
-            public Node(int value, int index)
-            {
-                this.index = index;
-                this.value = value;
-                this.left = null;
-                this.right = null;
-            }
+            public Node(int index) { this.index = index; }
+            public Node(int value, int index) { this.index = index; this.value = value; }
             public void set_sign(int sign) => this.sign = sign;
             public void set_left(Node left) => this.left = left;
             public void set_right(Node right) => this.right = right;
@@ -363,11 +359,7 @@ namespace GKR_Backend.Services
 
             public Prover(int layer, int[] gateNum, int[] bitsLen, int mod, Node[][] circuit)
             {
-                this.layer = layer;
-                this.gateNum = gateNum;
-                this.bitsLen = bitsLen;
-                this.mod = mod;
-                this.circuit = circuit;
+                this.layer = layer; this.gateNum = gateNum; this.bitsLen = bitsLen; this.mod = mod; this.circuit = circuit;
                 rand = new Random();
                 Vs = new Func<int[], int>[layer];
                 funs = new Func<int[], int[], int[], int>[layer - 1];
@@ -378,7 +370,7 @@ namespace GKR_Backend.Services
             }
             public int W(int now_lawer, int index) => (int)circuit[now_lawer][index].value;
 
-            public Func<int[], int> make_V(int layer)                           //創建層多項式
+            public Func<int[], int> make_V(int layer)
             {
                 return (int[] z) =>
                 {
@@ -420,8 +412,7 @@ namespace GKR_Backend.Services
             {
                 return (int z) =>
                 {
-                    long s = 0;
-                    long val1 = 0; long val2 = 0;
+                    long s = 0; long val1 = 0; long val2 = 0;
                     var g = funs[nowLayer];
                     int[] parameter = new int[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
@@ -429,15 +420,8 @@ namespace GKR_Backend.Services
                     for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length - 1); i++)
                     {
                         int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length - 1);
-                        for (int j = 0; j < restBits.Length; j++)
-                        {
-                            parameter[fixed_var.Length + 1 + j] = restBits[j];
-                        }
-                        val1 += g(
-                            parameter.Take(bitsLen[nowLayer]).ToArray(),
-                            parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(),
-                            parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
-                            );
+                        for (int j = 0; j < restBits.Length; j++) parameter[fixed_var.Length + 1 + j] = restBits[j];
+                        val1 += g(parameter.Take(bitsLen[nowLayer]).ToArray(), parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(), parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray());
                         val1 = Mod(val1, mod);
                         val2 += maskedPolys[nowLayer](parameter);
                         val2 = Mod(val2, mod);
@@ -453,24 +437,13 @@ namespace GKR_Backend.Services
                     int[] b = fixed_var.Skip(bitsLen[layer]).Take(bitsLen[layer + 1]).ToArray();
                     int[] c = fixed_var.Skip(bitsLen[layer] + bitsLen[layer + 1]).Take(bitsLen[layer + 1]).ToArray();
                     int[] l = new int[bitsLen[layer + 1]];
-                    for (int i = 0; i < l.Length; i++)
-                    {
-                        long val = (long)b[i] * (1 - z) + (long)c[i] * z;
-                        l[i] = Mod(val, mod);
-                    }
+                    for (int i = 0; i < l.Length; i++) l[i] = Mod((long)b[i] * (1 - z) + (long)c[i] * z, mod);
                     return l;
                 };
             }
             public Func<int, int> make_q(int layer, int[] fixed_var)
             {
-                return (int z) =>
-                {
-                    int s = 0;
-                    var l = make_l(layer, fixed_var);
-                    var V_next = Vs[layer + 1];
-                    s = V_next(l(z));
-                    return s;
-                };
+                return (int z) => Vs[layer + 1](make_l(layer, fixed_var)(z));
             }
             public Func<int[], int> claimed_D() => (int[] z) => Vs[0](z);
             public int maskSum(int layer, int[] fixed_var)
@@ -482,8 +455,7 @@ namespace GKR_Backend.Services
                 for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length); i++)
                 {
                     int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length);
-                    for (int j = 0; j < restBits.Length; j++)
-                        parameter[fixed_var.Length + j] = restBits[j];
+                    for (int j = 0; j < restBits.Length; j++) parameter[fixed_var.Length + j] = restBits[j];
                     s = Mod(s + maskedPolys[layer](parameter), mod);
                 }
                 return (int)s;
@@ -492,13 +464,8 @@ namespace GKR_Backend.Services
             public Func<int[], int> make_H(int numVars)
             {
                 long constantTerm = pickRandom();
-                long[] coeffA = new long[numVars];
-                long[] coeffB = new long[numVars];
-                for (int i = 0; i < numVars; i++)
-                {
-                    coeffA[i] = pickRandom();
-                    coeffB[i] = pickRandom();
-                }
+                long[] coeffA = new long[numVars]; long[] coeffB = new long[numVars];
+                for (int i = 0; i < numVars; i++) { coeffA[i] = pickRandom(); coeffB[i] = pickRandom(); }
                 return (int[] parameter) =>
                 {
                     long s = constantTerm;
@@ -519,11 +486,7 @@ namespace GKR_Backend.Services
         {
             private Random rand;
             private int mod;
-            public Verifier(int mod)
-            {
-                this.mod = mod;
-                rand = new Random();
-            }
+            public Verifier(int mod) { this.mod = mod; rand = new Random(); }
             public int pickRandom() => rand.Next(mod);
             public Func<int[], int> make_input(Node[] input, int bitslen)
             {

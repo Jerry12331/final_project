@@ -84,10 +84,10 @@ const protocolState = ref({
 
 onMounted(async () => {
   try {
-    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0,1],[1,0]];
+    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[0,1]];
     const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
 
-    // 將此處換成您實際的網址與埠號
+    // 呼叫 C# API
     const response = await fetch("http://localhost:5285/api/run_gkr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,110 +100,96 @@ onMounted(async () => {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     
-    // 💡 印出 C# 傳來的原始資料，如果您發現對話框文字怪怪的，可以來這裡看
-    console.log("C# 回傳的原始 Log:", data.log);
+    console.log("C# 回傳的結構化 Events:", data.log);
     
-    parseBackendLogs(data.log);
+    // ⭐️ 直接處理結構化的 Event Array
+    parseEvents(data.log);
 
   } catch (error) {
     console.error("GKR API Error:", error);
-    alert("與後端連線失敗，請檢查 C# 伺服器是否開啟。\n" + error.message);
+    alert("與後端連線失敗，請檢查 C# 伺服器。\n" + error.message);
   }
 });
 
-// 解析 C# Log，轉換為對話框結構
-function parseBackendLogs(logs) {
-  let parsedLayers = [];
-  let currentLayerObj = null;
-  let currentRoundObj = null;
-  let roundCounter = 1;
-  let layerIdx = 0;
+// ⭐️ 全新的解析邏輯：乾淨、強健、不需要猜字串
+function parseEvents(events) {
+  // 防呆：如果後端回傳空資料或 Error
+  if (!events || events.length === 0) return;
+  if (events.some(e => e.Role === "System" && e.Message.includes("Error"))) {
+     protocolState.value.layers = [{
+        layerIndex: 0, isOpen: true, 
+        sumcheck: { boundary: "⚠️ 計算發生錯誤", rounds: [{ round: 1, verifier: events.map(e => e.Message).join('\n'), prover: "" }] }
+     }];
+     return;
+  }
 
-  for (let line of logs) {
-    // 偵測是否換層
-    if (line.includes("Setting up Circuit") || line.includes("send D()")) {
-      if (currentRoundObj && currentLayerObj) {
-          currentLayerObj.sumcheck.rounds.push(currentRoundObj);
-          currentRoundObj = null;
-      }
-      currentLayerObj = { 
-          layerIndex: layerIdx++, 
-          isOpen: true, 
-          sumcheck: { boundary: "Output Layer", rounds: [] } 
-      };
-      parsedLayers.push(currentLayerObj);
-      roundCounter = 1;
-    } else if (line.includes("sum check start")) {
-      if (currentRoundObj && currentLayerObj) {
-          currentLayerObj.sumcheck.rounds.push(currentRoundObj);
-          currentRoundObj = null;
-      }
-      currentLayerObj = { 
-          layerIndex: layerIdx++, 
-          isOpen: true, 
-          sumcheck: { boundary: `Layer ${layerIdx-1}`, rounds: [] } 
-      };
-      parsedLayers.push(currentLayerObj);
-      roundCounter = 1;
+  // 用 Map 來整理 Layer 和 Round
+  const layersMap = new Map();
+
+  events.forEach(event => {
+    // 1. 找尋或建立 Layer
+    if (!layersMap.has(event.ProtocolLayer)) {
+      layersMap.set(event.ProtocolLayer, {
+        layerIndex: event.ProtocolLayer,
+        isOpen: true,
+        sumcheck: {
+          boundary: event.ProtocolLayer === 0 ? "Layer 0 (Output Layer)" : `Layer ${event.ProtocolLayer} Sumcheck`,
+          roundsMap: new Map() // 暫時用來分組 Round 的 Map
+        }
+      });
     }
 
-    if (!currentLayerObj) {
-        currentLayerObj = { layerIndex: layerIdx++, isOpen: true, sumcheck: { boundary: "System", rounds: [] } };
-        parsedLayers.push(currentLayerObj);
+    const layerObj = layersMap.get(event.ProtocolLayer);
+    const roundsMap = layerObj.sumcheck.roundsMap;
+
+    // 2. 找尋或建立 Round
+    if (!roundsMap.has(event.Round)) {
+      roundsMap.set(event.Round, {
+        round: event.Round,
+        prover: "",
+        verifier: ""
+      });
     }
 
-    // 處理 Prover 與 Verifier 對話
-    if (line.startsWith("P:") || line.startsWith("V:")) {
-      if (!currentRoundObj) {
-          currentRoundObj = { round: roundCounter, verifier: "", prover: "" };
-      }
-      
-      if (line.startsWith("P:")) {
-          currentRoundObj.prover += line.substring(2).trim() + "\n";
-      } else if (line.startsWith("V:")) {
-          currentRoundObj.verifier += line.substring(2).trim() + "\n";
-          // V 講完話，推入這回合
-          currentLayerObj.sumcheck.rounds.push({...currentRoundObj});
-          currentRoundObj = null;
-          roundCounter++;
-      }
+    const roundObj = roundsMap.get(event.Round);
+
+    // 3. 把對話塞進對應的氣泡框
+    if (event.Role === "Prover") {
+      roundObj.prover += event.Message + "\n";
+    } else if (event.Role === "Verifier") {
+      roundObj.verifier += event.Message + "\n";
     } else {
-       // 其他系統訊息
-       if (!line.includes("Setting up Circuit") && !line.includes("sum check start")) {
-           if (!currentRoundObj) {
-               currentRoundObj = { round: roundCounter, verifier: "", prover: "" };
-           }
-           currentRoundObj.verifier += `[系統] ${line}\n`;
-       }
+      // System 訊息統一放在 Verifier 框框當作提示
+      roundObj.verifier += `[系統] ${event.Message}\n`;
     }
-  }
-  
-  if (currentRoundObj && currentLayerObj) {
-      currentLayerObj.sumcheck.rounds.push(currentRoundObj);
-  }
+  });
 
-  // 避免空白資料
-  if (parsedLayers.length === 0 || parsedLayers[0].sumcheck.rounds.length === 0) {
-      parsedLayers = [{
-          layerIndex: 0, 
-          isOpen: true, 
-          sumcheck: { boundary: "GKR 執行紀錄", rounds: [{ round: 1, verifier: "Raw Log", prover: logs.join("\n") }] }
-      }];
-  }
+  // 4. 將 Map 轉回 Vue 可以渲染的 Array，並排序
+  const parsedLayers = Array.from(layersMap.values()).map(layer => {
+    return {
+      layerIndex: layer.layerIndex,
+      isOpen: layer.isOpen,
+      sumcheck: {
+        boundary: layer.sumcheck.boundary,
+        rounds: Array.from(layer.sumcheck.roundsMap.values()).sort((a, b) => a.round - b.round)
+      }
+    };
+  }).sort((a, b) => a.layerIndex - b.layerIndex);
 
   protocolState.value.layers = parsedLayers;
-  
-  // ⭐️ 修正 1：確保強制從第 0 步開始
-  currentStep.value = 0; 
+  currentStep.value = 0; // 強制從第 0 步開始
 }
 
+
+// ==========================================
+// 介面控制邏輯 (完全不用動)
+// ==========================================
 const totalSteps = computed(() => {
   return protocolState.value.layers.reduce((sum, layer) => {
     return sum + (layer.sumcheck?.rounds.length || 0);
   }, 0);
 });
 
-// ⭐️ 修正 2：計算跨層 (Global) 的目前步驟，讓對話框能正確隨步驟顯示
 function visibleRounds(layer) {
   if (!layer.sumcheck) return [];
   
@@ -213,10 +199,8 @@ function visibleRounds(layer) {
     previousRoundsCount += l.sumcheck.rounds.length;
   }
 
-  // 計算屬於「這一層」可顯示的數量
   const availableStepsForThisLayer = currentStep.value + 1 - previousRoundsCount;
-
-  if (availableStepsForThisLayer <= 0) return []; // 還沒輪到這層
+  if (availableStepsForThisLayer <= 0) return []; 
 
   const visibleCount = Math.min(availableStepsForThisLayer, layer.sumcheck.rounds.length);
   return layer.sumcheck.rounds.slice(0, visibleCount);
@@ -227,9 +211,7 @@ const activeLayer = computed(() => {
   for (const layer of protocolState.value.layers) {
     if (!layer.sumcheck) continue;
     stepCount += layer.sumcheck.rounds.length;
-    if (currentStep.value < stepCount) {
-      return layer.layerIndex;
-    }
+    if (currentStep.value < stepCount) return layer.layerIndex;
   }
   return 0;
 });
@@ -240,15 +222,11 @@ function toggleLayer(layerIndex) {
 }
 
 function nextStep() {
-  if (currentStep.value < totalSteps.value - 1) {
-    currentStep.value++;
-  }
+  if (currentStep.value < totalSteps.value - 1) currentStep.value++;
 }
 
 function prevStep() {
-  if (currentStep.value > 0) {
-    currentStep.value--;
-  }
+  if (currentStep.value > 0) currentStep.value--;
 }
 </script>
 

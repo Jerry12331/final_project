@@ -1,7 +1,12 @@
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // 設定 JSON 序列化為 PascalCase (保持 C# 原本大小寫)
+        options.JsonSerializerOptions.PropertyNamingPolicy = null;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

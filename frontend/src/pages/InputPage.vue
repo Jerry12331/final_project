@@ -46,8 +46,8 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 
-const circuitText = ref("[[0,1],[1,0]]");
-const inputText = ref("[1,0,1,1]");
+const circuitText = ref("[[0],[0,1]]");
+const inputText = ref("[3,5,2,7]");
 const error = ref("");
 
 function submit() {
