@@ -14,7 +14,7 @@
         <button 
           @click="toggleLayer(layer.layerIndex)"
           class="layer-header"
-          :class="{ active: currentLayer === layer.layerIndex }"
+          :class="{ active: activeLayer === layer.layerIndex }"
         >
           <span class="layer-title">Layer {{ layer.layerIndex }}</span>
           <span class="collapse-icon">{{ layer.isOpen ? '▼' : '▶' }}</span>
@@ -59,9 +59,12 @@
     </div>
 
     <div class="controls">
-      <button @click="prevStep">Previous Step</button>
-      <button @click="nextStep">Next Step</button>
-      <span class="step-info">Step {{ currentStep + 1 }} / {{ totalSteps }}</span>
+      <button @click="prevStep" :disabled="currentStep <= 0">Previous Step</button>
+      <button @click="nextStep" :disabled="currentStep >= totalSteps - 1">Next Step</button>
+      
+      <span class="step-info">
+        Debug: Step Index {{ currentStep }} | Total {{ totalSteps }}
+      </span>
     </div>
   </div>
 </template>
@@ -98,12 +101,14 @@ onMounted(async () => {
     });
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    // 在 ChatPage.vue 的 onMounted 裡面
     const data = await response.json();
-    
-    console.log("C# 回傳的結構化 Events:", data.log);
-    
-    // ⭐️ 直接處理結構化的 Event Array
-    parseEvents(data.log);
+
+    // ⭐️ 這裡增加一個相容性判斷，確保大寫 Log 也能被讀到
+    const events = data.Log || data.log; 
+
+    console.log("收到 Events:", events);
+    parseEvents(events);
 
   } catch (error) {
     console.error("GKR API Error:", error);
@@ -111,105 +116,90 @@ onMounted(async () => {
   }
 });
 
-// ⭐️ 全新的解析邏輯：乾淨、強健、不需要猜字串
-function parseEvents(events) {
-  // 防呆：如果後端回傳空資料或 Error
-  if (!events || events.length === 0) return;
-  if (events.some(e => e.Role === "System" && e.Message.includes("Error"))) {
-     protocolState.value.layers = [{
-        layerIndex: 0, isOpen: true, 
-        sumcheck: { boundary: "⚠️ 計算發生錯誤", rounds: [{ round: 1, verifier: events.map(e => e.Message).join('\n'), prover: "" }] }
-     }];
-     return;
-  }
 
-  // 用 Map 來整理 Layer 和 Round
+function parseEvents(events) {
+  if (!events || events.length === 0) return;
+
   const layersMap = new Map();
 
   events.forEach(event => {
-    // 1. 找尋或建立 Layer
-    if (!layersMap.has(event.ProtocolLayer)) {
-      layersMap.set(event.ProtocolLayer, {
-        layerIndex: event.ProtocolLayer,
+    // 再次確保內部屬性的大寫相容
+    const pLayer = event.ProtocolLayer ?? event.protocolLayer;
+    const pRound = event.Round ?? event.round;
+    const pRole = event.Role ?? event.role;
+    const pMessage = event.Message ?? event.message;
+
+    if (!layersMap.has(pLayer)) {
+      layersMap.set(pLayer, {
+        layerIndex: pLayer,
         isOpen: true,
         sumcheck: {
-          boundary: event.ProtocolLayer === 0 ? "Layer 0 (Output Layer)" : `Layer ${event.ProtocolLayer} Sumcheck`,
-          roundsMap: new Map() // 暫時用來分組 Round 的 Map
+          boundary: pLayer === 0 ? "Output Layer" : `Layer ${pLayer} Sumcheck`,
+          roundsMap: new Map()
         }
       });
     }
 
-    const layerObj = layersMap.get(event.ProtocolLayer);
-    const roundsMap = layerObj.sumcheck.roundsMap;
-
-    // 2. 找尋或建立 Round
-    if (!roundsMap.has(event.Round)) {
-      roundsMap.set(event.Round, {
-        round: event.Round,
-        prover: "",
-        verifier: ""
-      });
+    const roundsMap = layersMap.get(pLayer).sumcheck.roundsMap;
+    if (!roundsMap.has(pRound)) {
+      roundsMap.set(pRound, { round: pRound, prover: "", verifier: "" });
     }
 
-    const roundObj = roundsMap.get(event.Round);
-
-    // 3. 把對話塞進對應的氣泡框
-    if (event.Role === "Prover") {
-      roundObj.prover += event.Message + "\n";
-    } else if (event.Role === "Verifier") {
-      roundObj.verifier += event.Message + "\n";
-    } else {
-      // System 訊息統一放在 Verifier 框框當作提示
-      roundObj.verifier += `[系統] ${event.Message}\n`;
-    }
+    const roundObj = roundsMap.get(pRound);
+    if (pRole === "Prover") roundObj.prover += pMessage + "\n";
+    else if (pRole === "Verifier") roundObj.verifier += pMessage + "\n";
+    else roundObj.verifier += `[系統] ${pMessage}\n`;
   });
 
-  // 4. 將 Map 轉回 Vue 可以渲染的 Array，並排序
-  const parsedLayers = Array.from(layersMap.values()).map(layer => {
-    return {
-      layerIndex: layer.layerIndex,
-      isOpen: layer.isOpen,
-      sumcheck: {
-        boundary: layer.sumcheck.boundary,
-        rounds: Array.from(layer.sumcheck.roundsMap.values()).sort((a, b) => a.round - b.round)
-      }
-    };
-  }).sort((a, b) => a.layerIndex - b.layerIndex);
+  // 轉換 Map 為 Array
+  protocolState.value.layers = Array.from(layersMap.values()).map(l => ({
+    ...l,
+    sumcheck: {
+      boundary: l.sumcheck.boundary,
+      rounds: Array.from(l.sumcheck.roundsMap.values()).sort((a, b) => a.round - b.round)
+    }
+  })).sort((a, b) => a.layerIndex - b.layerIndex);
 
-  protocolState.value.layers = parsedLayers;
-  currentStep.value = 0; // 強制從第 0 步開始
+  currentStep.value = 0; // 從第一步開始
 }
-
 
 // ==========================================
 // 介面控制邏輯 (完全不用動)
 // ==========================================
+// 1. 修正：計算總步數（所有的 Round 總和）
 const totalSteps = computed(() => {
+  if (!protocolState.value.layers) return 0;
   return protocolState.value.layers.reduce((sum, layer) => {
-    return sum + (layer.sumcheck?.rounds.length || 0);
+    return sum + (layer.sumcheck?.rounds?.length || 0);
   }, 0);
 });
 
+// 2. 修正：讓對話框能正確顯示
 function visibleRounds(layer) {
-  if (!layer.sumcheck) return [];
+  if (!layer.sumcheck || !layer.sumcheck.rounds) return [];
   
+  // 計算在這一層之前已經用掉了多少步
   let previousRoundsCount = 0;
   for (const l of protocolState.value.layers) {
     if (l.layerIndex === layer.layerIndex) break;
     previousRoundsCount += l.sumcheck.rounds.length;
   }
 
-  const availableStepsForThisLayer = currentStep.value + 1 - previousRoundsCount;
-  if (availableStepsForThisLayer <= 0) return []; 
+  // 目前這一步相對於這一層的偏移量
+  const currentStepInThisLayer = currentStep.value - previousRoundsCount;
 
-  const visibleCount = Math.min(availableStepsForThisLayer, layer.sumcheck.rounds.length);
+  // 如果 currentStep 還沒到這一層，回傳空陣列
+  if (currentStepInThisLayer < 0) return []; 
+
+  // 回傳該層目前應該顯示的 Round 數量
+  const visibleCount = Math.min(currentStepInThisLayer + 1, layer.sumcheck.rounds.length);
   return layer.sumcheck.rounds.slice(0, visibleCount);
 }
 
+// 3. 修正：自動判斷當前處於哪一層 (讓 UI 自動展開對應的 Layer)
 const activeLayer = computed(() => {
   let stepCount = 0;
   for (const layer of protocolState.value.layers) {
-    if (!layer.sumcheck) continue;
     stepCount += layer.sumcheck.rounds.length;
     if (currentStep.value < stepCount) return layer.layerIndex;
   }
@@ -222,7 +212,12 @@ function toggleLayer(layerIndex) {
 }
 
 function nextStep() {
-  if (currentStep.value < totalSteps.value - 1) currentStep.value++;
+  // 只要目前步數小於總步數，就允許下一步
+  if (currentStep.value < totalSteps.value - 1) {
+    currentStep.value++;
+  } else {
+    console.log("已經是最後一步了", currentStep.value, totalSteps.value);
+  }
 }
 
 function prevStep() {
