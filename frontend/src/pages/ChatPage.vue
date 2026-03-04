@@ -1,7 +1,7 @@
 <template>
   <div class="chat-page">
     <!-- Circuit Visualization -->
-    <CircuitCanvas :activeLayer="activeLayer" />
+    <CircuitCanvas :activeLayer="activeLayer" :circuit="circuit" />
 
     <!-- 結構化的 Protocol View -->
     <div class="protocol-container">
@@ -80,6 +80,9 @@ const route = useRoute();
 const currentStep = ref(0);
 const currentLayer = ref(0);
 
+// 存儲從後端或路由獲得的電路
+const circuit = ref(null);
+
 const protocolState = ref({
   currentLayer: 0,
   layers: []
@@ -89,6 +92,10 @@ onMounted(async () => {
   try {
     const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[0,1]];
     const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
+
+    // 🔍 需要被追踪的电路数据
+    circuit.value = circuitData;
+    console.log("circuit.value 已设置:", circuit.value);
 
     // 呼叫 C# API
     const response = await fetch("http://localhost:5285/api/run_gkr", {
@@ -103,6 +110,11 @@ onMounted(async () => {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     // 在 ChatPage.vue 的 onMounted 裡面
     const data = await response.json();
+
+    // 🔍 檢查是不是雙軌電路
+    console.log("matrix from backend:", data);
+    console.log("circuitData sent to backend:", circuitData);
+    console.log("circuit used in canvas:", circuit.value);
 
     // ⭐️ 這裡增加一個相容性判斷，確保大寫 Log 也能被讀到
     const events = data.Log || data.log; 

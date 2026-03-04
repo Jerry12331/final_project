@@ -32,15 +32,16 @@ defineProps({
   activeLayer: {
     type: Number,
     required: true
+  },
+  circuit: {
+    type: Array,
+    default: () => [
+      [0, 1],           // Layer 0
+      [1, 0, 1, 0],     // Layer 1
+      [0, 1, 0, 1, 1, 0, 1, 0]  // Layer 2
+    ]
   }
 });
-
-// 定義電路結構
-const circuit = [
-  [0, 1],           // Layer 0
-  [1, 0, 1, 0],     // Layer 1
-  [0, 1, 0, 1, 1, 0, 1, 0]  // Layer 2
-];
 </script>
 
 <style scoped>
