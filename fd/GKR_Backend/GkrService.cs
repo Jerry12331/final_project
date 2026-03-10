@@ -55,7 +55,7 @@ namespace GKR_Backend.Services
 
             _currentLayer = 0; 
             _currentRound = 1; 
-            AddSystemEvent($"Setting up Circuit with Mod: {mod}, Layers: {totalLayers}");
+            AddSystemEvent($"嘿，大家好！我們要開始 GKR 協議了。模數是 {mod}，總共有 {totalLayers} 層電路。");
 
             for (int i = 0; i < totalLayers; i++)
             {
@@ -66,6 +66,7 @@ namespace GKR_Backend.Services
                     {
                         circuit[i][j] = new Node(inputs[j], j);
                     }
+                    AddSystemEvent($"第 {i} 層是輸入層，有 {inputs.Length} 個輸入值：{string.Join(", ", inputs)}");
                 }
                 else
                 {
@@ -76,6 +77,7 @@ namespace GKR_Backend.Services
                         circuit[i][j] = new Node(j);
                         circuit[i][j].set_sign(layerConfig[j]);
                     }
+                    AddSystemEvent($"第 {i} 層有 {layerConfig.Length} 個閘門，配置是：{string.Join(", ", layerConfig)}（0=加法，1=乘法）");
                 }
             }
 
@@ -108,6 +110,8 @@ namespace GKR_Backend.Services
                 bitsLen[i] = (gateNum[i] == 1) ? 1 : (int)Math.Ceiling(Math.Log(gateNum[i], 2));
             }
 
+            AddSystemEvent($"計算每層的值... 從最底層開始往上算。");
+
             for (int i = totalLayers - 1; i >= 0; i--)
             {
                 for (int j = 0; j < circuit[i].Length; j++)
@@ -127,13 +131,13 @@ namespace GKR_Backend.Services
 
             string outputVals = "";
             for (int i = 0; i < gateNum[0]; i++) outputVals += claimed_D(IntToBinary(i, bitsLen[0])) + " ";
-            AddProverEvent($"send D() and the circuit outputs: {outputVals}");
+            AddProverEvent($"先發送整個電路的輸出值：{outputVals}。這是用 D 多項式算出來的，每個輸入對應的結果。");
 
             for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-            AddVerifierEvent($"send fixed_var = " + string.Join(", ", fixed_var));
+            AddVerifierEvent($"我隨機選了一些固定變數：{string.Join(", ", fixed_var)}，用來測試 D 多項式。");
 
             int claimed = claimed_D(fixed_var);
-            AddProverEvent($"claimed D(fixed_var) = {claimed}");
+            AddProverEvent($"用這些固定變數算 D 多項式的值，結果是 {claimed}。這就是聲稱的答案！");
             
             _currentRound++; 
 
@@ -142,42 +146,52 @@ namespace GKR_Backend.Services
                 _currentLayer = now_layer + 1; // 為了對齊前端視覺，把 Sumcheck 定義在下一層
                 _currentRound = 1;         
 
+                AddSystemEvent($"現在進入第 {now_layer + 1} 層的 Sumcheck！Prover 要證明他的聲稱是對的。");
+
                 int maskSum = prover.maskSum(now_layer, fixed_var);
-                AddProverEvent($"send maskSum = {maskSum}");
-                
+                AddProverEvent($"計算了 maskSum（遮罩和），這是把所有相關的多項式加起來，結果是 {maskSum}。");
+
                 int rho = verifier.pickRandom();
-                AddVerifierEvent($"send rho = {rho}", incrementRound: true); 
+                AddVerifierEvent($"我隨機選了一個 rho = {rho}，用來檢查 Sumcheck。", incrementRound: true); 
 
                 claimed = Mod(claimed + Mod(rho * maskSum, mod), mod);
+                AddSystemEvent($"更新聲稱值：原來的 {claimed - Mod(rho * maskSum, mod)} 加上 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，結果是 {claimed}。");
                 
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2; i++)
                 {
                     var G = prover.make_G(fixed_var, now_layer, rho);
 
-                    int term = Mod((long)G(0) + (long)G(1), mod);
-                    if (term != claimed)
+                    int g0 = G(0);
+                    int g1 = G(1);
+                    int sumTerm = Mod((long)g0 + (long)g1, mod);
+                    AddProverEvent($"計算了 G 多項式在 0 和 1 的值：G(0) = {g0}, G(1) = {g1}，加起來是 {sumTerm}。");
+
+                    if (sumTerm != claimed)
                     {
-                        AddVerifierEvent("sum check failed (G(0)+G(1) != claimed)");
+                        AddVerifierEvent($"檢查失敗！G(0) + G(1) = {sumTerm}，但聲稱的是 {claimed}，不一樣啊！");
                         return;
                     }
 
                     int s = verifier.pickRandom();
-                    AddVerifierEvent($"send s{i} = {s}");
+                    AddVerifierEvent($"檢查通過！G(0)+G(1) 等於聲稱值。現在我隨機選 s{i} = {s}，繼續下一輪。");
                     
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
                     
-                    AddProverEvent($"claimed G{i}(s{i}) = {claimed}");
+                    AddProverEvent($"用 s{i} = {s} 算 G 多項式的值，得到新的聲稱 {claimed}。");
                     _currentRound++; 
 
                     if (now_layer == totalLayers - 2 && i == bitsLen[now_layer + 1] * 2 - 1)
                     {
+                        AddSystemEvent($"最後一輪！要檢查輸入層的多項式。");
+
                         var input_poly = verifier.make_input(circuit[totalLayers - 1], bitsLen[totalLayers - 1]);
                         
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        AddProverEvent($"send maskSum with fixed_var = {maskSum}");
+                        AddProverEvent($"最後的 maskSum（考慮所有固定變數）= {maskSum}。");
                         
                         claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
+                        AddSystemEvent($"最終聲稱值：原來的 {claimed + Mod(rho * maskSum, mod)} 減去 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，結果是 {claimed}。");
 
                         int[] a = fixed_var.Take(bitsLen[totalLayers - 2]).ToArray();
                         int[] b = fixed_var.Skip(bitsLen[totalLayers - 2]).Take(bitsLen[totalLayers - 1]).ToArray();
@@ -185,27 +199,32 @@ namespace GKR_Backend.Services
 
                         long final_addPolyVal = AddPoly(totalLayers - 2, circuit, mod)(a, b, c);
                         long final_mulPolyVal = MulPoly(totalLayers - 2, circuit, mod)(a, b, c);
-                        long final_part1 = Mod(final_addPolyVal * Mod(input_poly(b) + input_poly(c), mod), mod);
-                        long final_part2 = Mod(final_mulPolyVal * Mod(input_poly(b) * input_poly(c), mod), mod);
-                        term = Mod(final_part1 + final_part2, mod);
+                        long inputB = input_poly(b);
+                        long inputC = input_poly(c);
+                        long final_part1 = Mod(final_addPolyVal * Mod(inputB + inputC, mod), mod);
+                        long final_part2 = Mod(final_mulPolyVal * Mod(inputB * inputC, mod), mod);
+                        long finalTerm = Mod(final_part1 + final_part2, mod);
 
-                        if (claimed != term) { 
-                            AddVerifierEvent($"final check failed (Claimed {claimed} != Term {term})"); 
+                        AddVerifierEvent($"最終檢查：加法多項式值 {final_addPolyVal} * (輸入B {inputB} + 輸入C {inputC}) = {final_part1}，乘法多項式值 {final_mulPolyVal} * (輸入B * 輸入C = {inputB * inputC}) = {final_part2}，加起來是 {finalTerm}。");
+
+                        if (claimed != finalTerm) { 
+                            AddVerifierEvent($"最終檢查失敗！聲稱 {claimed} 不等於計算結果 {finalTerm}。"); 
                             return; 
                         }
-                        AddVerifierEvent("sum check passed, Verifier can trust D()");
+                        AddVerifierEvent("太棒了！最終檢查通過，Verifier 相信 D() 是正確的！");
                         break;
                     }
 
                     if (i == bitsLen[now_layer + 1] * 2 - 1) 
                     {
                         var claimed_poly = prover.make_q(now_layer, fixed_var);
-                        AddProverEvent($"send claimed_poly q{now_layer + 1}");
+                        AddProverEvent($"發送了聲稱的多項式 q{now_layer + 1}，它的值在 0 和 1 會是 q(0)={claimed_poly(0)}, q(1)={claimed_poly(1)}。");
                         
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        AddProverEvent($"send maskSum = {maskSum}");
+                        AddProverEvent($"還有 maskSum = {maskSum}。");
                         
                         claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
+                        AddSystemEvent($"更新聲稱：減去 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，新聲稱是 {claimed}。");
 
                         int[] a = fixed_var.Take(bitsLen[now_layer]).ToArray();
                         int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
@@ -213,19 +232,24 @@ namespace GKR_Backend.Services
 
                         long addPolyVal = AddPoly(now_layer, circuit, mod)(a, b, c);
                         long mulPolyVal = MulPoly(now_layer, circuit, mod)(a, b, c);
-                        long part1 = Mod(addPolyVal * Mod(claimed_poly(0) + claimed_poly(1), mod), mod);
-                        long part2 = Mod(mulPolyVal * Mod(claimed_poly(0) * claimed_poly(1), mod), mod);
-                        term = Mod(part1 + part2, mod);
+                        long q0 = claimed_poly(0);
+                        long q1 = claimed_poly(1);
+                        long part1 = Mod(addPolyVal * Mod(q0 + q1, mod), mod);
+                        long part2 = Mod(mulPolyVal * Mod(q0 * q1, mod), mod);
+                        long intermediateTerm = Mod(part1 + part2, mod);
 
-                        if (claimed != term) { 
-                            AddVerifierEvent("intermediate check failed"); 
+                        AddVerifierEvent($"中間檢查：加法多項式 {addPolyVal} * (q(0)+q(1)={q0 + q1}) = {part1}，乘法多項式 {mulPolyVal} * (q(0)*q(1)={q0 * q1}) = {part2}，總和 {intermediateTerm}。");
+
+                        if (claimed != intermediateTerm) { 
+                            AddVerifierEvent("中間檢查失敗！"); 
                             return; 
                         }
 
                         int random_var = verifier.pickRandom();
-                        AddVerifierEvent($"sum check passed. send r{now_layer + 1} = {random_var}", incrementRound: true);
+                        AddVerifierEvent($"中間檢查通過！選下一個隨機數 r{now_layer + 1} = {random_var}。", incrementRound: true);
                         
                         claimed = claimed_poly(random_var);
+                        AddProverEvent($"用 r{now_layer + 1} 算 q 多項式，得到新聲稱 {claimed}。");
 
                         var l_poly = prover.make_l(now_layer, fixed_var);
                         Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
@@ -233,6 +257,7 @@ namespace GKR_Backend.Services
                         {
                             fixed_var[j] = l_poly(random_var)[j];
                         }
+                        AddSystemEvent($"更新固定變數：用 l 多項式算出新的變數 {string.Join(", ", fixed_var)}。");
                     }
                 }
             }
