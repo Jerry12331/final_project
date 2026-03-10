@@ -447,23 +447,23 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\user\\.nuget\\packages\\": {},
+    "C:\\Users\\User\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\user\\Desktop\\專題\\final_project\\fd\\GKR_Backend\\GKR_Backend.csproj",
+      "projectUniqueName": "C:\\Users\\User\\Desktop\\專題final\\final_project\\fd\\GKR_Backend\\GKR_Backend.csproj",
       "projectName": "GKR_Backend",
-      "projectPath": "C:\\Users\\user\\Desktop\\專題\\final_project\\fd\\GKR_Backend\\GKR_Backend.csproj",
-      "packagesPath": "C:\\Users\\user\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\user\\Desktop\\專題\\final_project\\fd\\GKR_Backend\\obj\\",
+      "projectPath": "C:\\Users\\User\\Desktop\\專題final\\final_project\\fd\\GKR_Backend\\GKR_Backend.csproj",
+      "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\User\\Desktop\\專題final\\final_project\\fd\\GKR_Backend\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\user\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\User\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
