@@ -26,12 +26,23 @@
             :key="gate.id ?? gateIndex"
             :ref="el => setGateRef(layerIndex, gateIndex, el)"
             class="gate"
-            :class="gateType(gate)"
+            :class="[gateType(gate), { active: isActiveGate(layerIndex, gateIndex) }]"
+            @mouseenter="setHoveredGate(gate, layerIndex, gateIndex)"
+            @mouseleave="hoveredGate = null"
           >
             {{ gateSymbol(gate) }}
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="hoveredGate" class="hover-box">
+      <p><b>Gate {{ hoveredGate.gateIndex + 1 }}</b></p>
+      <p>type: {{ tooltipGateType(hoveredGate.gate, hoveredGate.layerIndex) }}</p>
+      <p>value: {{ tooltipGateValue(hoveredGate.gate, hoveredGate.layerIndex) }}</p>
+      <p v-if="tooltipInputs(hoveredGate.gate, hoveredGate.layerIndex, hoveredGate.gateIndex)">
+        來自: {{ tooltipInputs(hoveredGate.gate, hoveredGate.layerIndex, hoveredGate.gateIndex) }}
+      </p>
     </div>
   </div>
 </template>
@@ -44,6 +55,10 @@ const props = defineProps({
     type: Number,
     required: true
   },
+  activeGates: {
+    type: Array,
+    default: () => []
+  },
   circuit: {
     type: Array,
     default: () => []
@@ -54,6 +69,7 @@ const GATE_SPACING = 80;
 const circuitRef = ref(null);
 const gateRefs = ref([]);
 const wires = ref([]);
+const hoveredGate = ref(null);
 
 const normalizedLayers = computed(() => {
   if (!Array.isArray(props.circuit)) return [];
@@ -126,6 +142,50 @@ function gateType(gate) {
 
 function gateSymbol(gate) {
   return gateType(gate) === "add" ? "+" : "×";
+}
+
+function setHoveredGate(gate, layerIndex, gateIndex) {
+  hoveredGate.value = { gate, layerIndex, gateIndex };
+}
+
+function isActiveGate(layerIndex, gateIndex) {
+  return props.activeGates.some((g) => {
+    const gLayer = g.layer ?? g.layerIndex;
+    const gIndex = g.index ?? g.gateIndex;
+    return gLayer === layerIndex && gIndex === gateIndex;
+  });
+}
+
+function tooltipGateType(gate, layerIndex) {
+  if (layerIndex === normalizedLayers.value.length - 1) return "INPUT";
+  return gateType(gate).toUpperCase();
+}
+
+function tooltipGateValue(gate, layerIndex) {
+  if (typeof gate === "object" && gate?.value !== undefined && gate?.value !== null) {
+    return gate.value;
+  }
+
+  if (layerIndex === normalizedLayers.value.length - 1 && typeof gate === "number") {
+    return gate;
+  }
+
+  return "N/A";
+}
+
+function tooltipInputs(gate, layerIndex, gateIndex) {
+  if (Array.isArray(gate?.inputs) && gate.inputs.length) {
+    return gate.inputs.join(", ");
+  }
+
+  const nextLayer = normalizedLayers.value[layerIndex + 1];
+  if (!nextLayer) return "";
+
+  const left = gateIndex * 2;
+  const right = gateIndex * 2 + 1;
+  if (right >= nextLayer.length) return "";
+
+  return `Gate ${left + 1} + Gate ${right + 1}`;
 }
 
 async function syncWires() {
@@ -244,6 +304,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   font-size: 22px;
   font-weight: bold;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .gate.add {
@@ -252,5 +313,30 @@ onBeforeUnmount(() => {
 
 .gate.mul {
   background: #fde68a;
+}
+
+.gate.active {
+  background: #3b82f6;
+  color: #fff;
+  transform: scale(1.1);
+  box-shadow: 0 8px 16px rgba(59, 130, 246, 0.35);
+}
+
+.hover-box {
+  position: fixed;
+  bottom: 40px;
+  right: 40px;
+  background: #111;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  z-index: 2000;
+}
+
+.hover-box p {
+  margin: 3px 0;
 }
 </style>

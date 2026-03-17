@@ -1,7 +1,7 @@
 <template>
   <div class="chat-page">
     <!-- Circuit Visualization -->
-    <CircuitCanvas :currentLayer="currentLayer" :circuit="circuit" />
+    <CircuitCanvas :currentLayer="currentLayer" :activeGates="currentActiveGates" :circuit="circuit" />
 
     <ExplanationBox :explanation="currentExplanation" />
 
@@ -257,6 +257,12 @@ const flattenedRounds = computed(() => {
 
 const currentLayer = computed(() => {
   return flattenedRounds.value[currentStep.value]?.layer ?? 0;
+});
+
+const currentActiveGates = computed(() => {
+  const step = flattenedRounds.value[currentStep.value];
+  const gates = step?.data?.activeGates;
+  return Array.isArray(gates) ? gates : [];
 });
 
 const currentExplanation = computed(() => {
