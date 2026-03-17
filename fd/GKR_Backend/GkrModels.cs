@@ -15,7 +15,9 @@ namespace GKR_Backend
         public int ProtocolLayer { get; set; } // 0, 1, 2...
         public int Round { get; set; }         // 1, 2, 3...
         public string Role { get; set; }       // "Prover", "Verifier", 或 "System"
+        public string? Type { get; set; }      // 結構化事件代碼，例如 SEND_RHO
         public string Message { get; set; }    // 具體的對話內容
+        public Dictionary<string, int>? Data { get; set; } // 事件附帶資料，例如 rho/s0/claimed
     }
 
     public class GkrResponse

@@ -1,7 +1,9 @@
 <template>
   <div class="chat-page">
     <!-- Circuit Visualization -->
-    <CircuitCanvas :activeLayer="activeLayer" :circuit="circuit" />
+    <CircuitCanvas :currentLayer="currentLayer" :circuit="circuit" />
+
+    <ExplanationBox :explanation="currentExplanation" />
 
     <!-- 結構化的 Protocol View -->
     <div class="protocol-container">
@@ -14,7 +16,7 @@
         <button 
           @click="toggleLayer(layer.layerIndex)"
           class="layer-header"
-          :class="{ active: activeLayer === layer.layerIndex }"
+          :class="{ active: currentLayer === layer.layerIndex }"
         >
           <span class="layer-title">Layer {{ layer.layerIndex }}</span>
           <span class="collapse-icon">{{ layer.isOpen ? '▼' : '▶' }}</span>
@@ -75,10 +77,10 @@
 import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import CircuitCanvas from "../components/CircuitCanvas.vue";
+import ExplanationBox from "../components/ExplanationBox.vue";
 
 const route = useRoute();
 const currentStep = ref(0);
-const currentLayer = ref(0);
 
 // 存儲從後端或路由獲得的電路
 const circuit = ref(null);
@@ -139,7 +141,9 @@ function parseEvents(events) {
     const pLayer = event.ProtocolLayer ?? event.protocolLayer;
     const pRound = event.Round ?? event.round;
     const pRole = event.Role ?? event.role;
+    const pType = event.Type ?? event.type ?? null;
     const pMessage = event.Message ?? event.message;
+    const pData = event.Data ?? event.data ?? null;
 
     if (!layersMap.has(pLayer)) {
       layersMap.set(pLayer, {
@@ -154,13 +158,24 @@ function parseEvents(events) {
 
     const roundsMap = layersMap.get(pLayer).sumcheck.roundsMap;
     if (!roundsMap.has(pRound)) {
-      roundsMap.set(pRound, { round: pRound, prover: "", verifier: "" });
+      roundsMap.set(pRound, {
+        round: pRound,
+        prover: "",
+        verifier: "",
+        type: null,
+        data: {}
+      });
     }
 
     const roundObj = roundsMap.get(pRound);
     if (pRole === "Prover") roundObj.prover += pMessage + "\n";
     else if (pRole === "Verifier") roundObj.verifier += pMessage + "\n";
-    else roundObj.verifier += `[系統] ${pMessage}\n`;
+    else roundObj.verifier += `${pMessage}\n`;
+
+    if (pType && ["SEND_RHO", "SEND_S", "CLAIM_VALUE"].includes(pType)) {
+      roundObj.type = pType;
+      roundObj.data = { ...roundObj.data, ...(pData || {}) };
+    }
   });
 
   // 轉換 Map 為 Array
@@ -209,15 +224,6 @@ function visibleRounds(layer) {
 }
 
 // 3. 修正：自動判斷當前處於哪一層 (讓 UI 自動展開對應的 Layer)
-const activeLayer = computed(() => {
-  let stepCount = 0;
-  for (const layer of protocolState.value.layers) {
-    stepCount += layer.sumcheck.rounds.length;
-    if (currentStep.value < stepCount) return layer.layerIndex;
-  }
-  return 0;
-});
-
 function toggleLayer(layerIndex) {
   const layer = protocolState.value.layers.find(l => l.layerIndex === layerIndex);
   if (layer) layer.isOpen = !layer.isOpen;
@@ -235,6 +241,72 @@ function nextStep() {
 function prevStep() {
   if (currentStep.value > 0) currentStep.value--;
 }
+
+const flattenedRounds = computed(() => {
+  return protocolState.value.layers.flatMap((layer) => {
+    return (layer.sumcheck?.rounds || []).map((round) => ({
+      layer: layer.layerIndex,
+      round: round.round,
+      type: round.type || "SYSTEM_MESSAGE",
+      data: round.data || {},
+      verifier: round.verifier || "",
+      prover: round.prover || ""
+    }));
+  });
+});
+
+const currentLayer = computed(() => {
+  return flattenedRounds.value[currentStep.value]?.layer ?? 0;
+});
+
+const currentExplanation = computed(() => {
+  const step = flattenedRounds.value[currentStep.value];
+
+  if (!step) {
+    return {
+      text: "等待驗證流程資料載入中",
+      variables: []
+    };
+  }
+
+  switch (step.type) {
+    case "SEND_RHO":
+      return {
+        text: "Verifier 正在用隨機數測試 Prover",
+        variables: [
+          {
+            name: "rho",
+            desc: `隨機挑戰數，用來防止作弊${step.data?.rho !== undefined ? ` (目前值: ${step.data.rho})` : ""}`
+          }
+        ]
+      };
+    case "SEND_S":
+      return {
+        text: "Verifier 選擇一個隨機點來檢查多項式",
+        variables: [
+          {
+            name: "s0",
+            desc: `測試多項式的隨機點${step.data?.s !== undefined ? ` (目前值: ${step.data.s})` : ""}`
+          }
+        ]
+      };
+    case "CLAIM_VALUE":
+      return {
+        text: "Prover 提出計算結果",
+        variables: [
+          {
+            name: "claimed value",
+            desc: `Prover 聲稱的結果${step.data?.claimed !== undefined ? ` (目前值: ${step.data.claimed})` : ""}`
+          }
+        ]
+      };
+    default:
+      return {
+        text: "正在進行 GKR 驗證",
+        variables: []
+      };
+  }
+});
 </script>
 
 
@@ -243,6 +315,7 @@ function prevStep() {
 .chat-page {
   padding: 20px;
   font-family: sans-serif;
+  padding-right: 340px;
 }
 
 /* Protocol Container - 結構化的 layers */
@@ -384,5 +457,11 @@ function prevStep() {
 .step-info {
   color: #6b7280;
   font-size: 14px;
+}
+
+@media (max-width: 1100px) {
+  .chat-page {
+    padding-right: 20px;
+  }
 }
 </style>

@@ -17,7 +17,7 @@
       <div
         v-for="(layer, layerIndex) in normalizedLayers"
         :key="layerIndex"
-        :class="['layer', { 'active-layer': layerIndex === activeLayer }]"
+        :class="['layer', { 'active-layer': layerIndex === currentLayer }]"
       >
         <div class="layer-label">Layer {{ layerIndex }}</div>
         <div class="gates-row" :style="layerStyle(layer)">
@@ -40,7 +40,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
-  activeLayer: {
+  currentLayer: {
     type: Number,
     required: true
   },
@@ -143,7 +143,7 @@ onMounted(() => {
 });
 
 watch(
-  () => props.activeLayer,
+  () => props.currentLayer,
   () => {
     syncWires();
   }

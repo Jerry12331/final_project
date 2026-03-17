@@ -27,20 +27,25 @@ namespace GKR_Backend.Services
             return _events;
         }
 
-        private void AddProverEvent(string msg)
+        private static Dictionary<string, int> Data(params (string key, int value)[] items)
         {
-            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Prover", Message = msg });
+            return items.ToDictionary(item => item.key, item => item.value);
         }
 
-        private void AddVerifierEvent(string msg, bool incrementRound = false)
+        private void AddProverEvent(string msg, string type = "PROVER_MESSAGE", Dictionary<string, int>? data = null)
         {
-            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Message = msg });
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Prover", Type = type, Message = msg, Data = data });
+        }
+
+        private void AddVerifierEvent(string msg, bool incrementRound = false, string type = "VERIFIER_MESSAGE", Dictionary<string, int>? data = null)
+        {
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Type = type, Message = msg, Data = data });
             if (incrementRound) _currentRound++;
         }
 
-        private void AddSystemEvent(string msg)
+        private void AddSystemEvent(string msg, string type = "SYSTEM_MESSAGE", Dictionary<string, int>? data = null)
         {
-             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "System", Message = msg });
+             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "System", Type = type, Message = msg, Data = data });
         }
 
 
@@ -137,7 +142,7 @@ namespace GKR_Backend.Services
             AddVerifierEvent($"我隨機選了一些固定變數：{string.Join(", ", fixed_var)}，用來測試 D 多項式。");
 
             int claimed = claimed_D(fixed_var);
-            AddProverEvent($"用這些固定變數算 D 多項式的值，結果是 {claimed}。這就是聲稱的答案！");
+            AddProverEvent($"用這些固定變數算 D 多項式的值，結果是 {claimed}。這就是聲稱的答案！", "CLAIM_VALUE", Data(("claimed", claimed)));
             
             _currentRound++; 
 
@@ -152,7 +157,7 @@ namespace GKR_Backend.Services
                 AddProverEvent($"計算了 maskSum（遮罩和），這是把所有相關的多項式加起來，結果是 {maskSum}。");
 
                 int rho = verifier.pickRandom();
-                AddVerifierEvent($"我隨機選了一個 rho = {rho}，用來檢查 Sumcheck。", incrementRound: true); 
+                AddVerifierEvent($"我隨機選了一個 rho = {rho}，用來檢查 Sumcheck。", incrementRound: true, type: "SEND_RHO", data: Data(("rho", rho))); 
 
                 claimed = Mod(claimed + Mod(rho * maskSum, mod), mod);
                 AddSystemEvent($"更新聲稱值：原來的 {claimed - Mod(rho * maskSum, mod)} 加上 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，結果是 {claimed}。");
@@ -173,12 +178,12 @@ namespace GKR_Backend.Services
                     }
 
                     int s = verifier.pickRandom();
-                    AddVerifierEvent($"檢查通過！G(0)+G(1) 等於聲稱值。現在我隨機選 s{i} = {s}，繼續下一輪。");
+                    AddVerifierEvent($"檢查通過！G(0)+G(1) 等於聲稱值。現在我隨機選 s{i} = {s}，繼續下一輪。", type: "SEND_S", data: Data(("s", s), ("sIndex", i)));
                     
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
                     
-                    AddProverEvent($"用 s{i} = {s} 算 G 多項式的值，得到新的聲稱 {claimed}。");
+                    AddProverEvent($"用 s{i} = {s} 算 G 多項式的值，得到新的聲稱 {claimed}。", "CLAIM_VALUE", Data(("claimed", claimed), ("fromS", s), ("sIndex", i)));
                     _currentRound++; 
 
                     if (now_layer == totalLayers - 2 && i == bitsLen[now_layer + 1] * 2 - 1)
@@ -249,7 +254,7 @@ namespace GKR_Backend.Services
                         AddVerifierEvent($"中間檢查通過！選下一個隨機數 r{now_layer + 1} = {random_var}。", incrementRound: true);
                         
                         claimed = claimed_poly(random_var);
-                        AddProverEvent($"用 r{now_layer + 1} 算 q 多項式，得到新聲稱 {claimed}。");
+                        AddProverEvent($"用 r{now_layer + 1} 算 q 多項式，得到新聲稱 {claimed}。", "CLAIM_VALUE", Data(("claimed", claimed), ("r", random_var), ("layer", now_layer + 1)));
 
                         var l_poly = prover.make_l(now_layer, fixed_var);
                         Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
