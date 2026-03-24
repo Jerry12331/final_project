@@ -4,6 +4,20 @@
 
     <ExplanationBox :explanation="currentExplanation" />
 
+    <div class="hidden-values-wrapper" v-if="hiddenValues && hiddenValues.length > 0">
+      <button @click="showHidden = !showHidden" class="toggle-hidden-btn">
+        {{ showHidden ? '點擊收起 Witness' : '點擊查看 Witness (隱藏值)' }}
+      </button>
+      
+      <div v-show="showHidden" class="hidden-values-content">
+        <span class="val-label">目前持有的隱藏值：</span>
+        <div class="pill-container">
+          <span v-for="(val, idx) in hiddenValues" :key="idx" class="val-pill">
+            {{ val }}
+          </span>
+        </div>
+      </div>
+    </div>
     <div class="protocol-container">
       <div 
         v-for="layer in protocolState.layers" 
@@ -73,8 +87,12 @@ import ExplanationBox from "../components/ExplanationBox.vue";
 const route = useRoute();
 const currentStep = ref(0);
 
-// 存儲從後端或路由獲得的電路
+// 存儲從後端或路由獲得的資料
 const circuit = ref(null);
+
+// 新增：儲存隱藏值與控制顯示狀態的變數
+const hiddenValues = ref([]);
+const showHidden = ref(false);
 
 const protocolState = ref({
   currentLayer: 0,
@@ -85,12 +103,12 @@ onMounted(async () => {
   try {
     const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[0,1]];
     const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
-    // ⭐️ 接收從 InputPage 傳來的隱藏值
     const hiddenData = route.query.hidden ? JSON.parse(route.query.hidden) : [];
 
-    // 🔍 需要被追踪的电路数据
     circuit.value = circuitData;
-    console.log("circuit.value 已设置:", circuit.value);
+    
+    // 把接到的隱藏值存進響應式變數中，供畫面上方渲染
+    hiddenValues.value = hiddenData;
 
     // 呼叫 C# API
     const response = await fetch("http://localhost:5285/api/run_gkr", {
@@ -99,23 +117,15 @@ onMounted(async () => {
       body: JSON.stringify({
         circuit: circuitData,
         inputs: inputData,
-        hiddenValues: hiddenData // ⭐️ 將隱藏值送往後端
+        hiddenValues: hiddenData // 目前後端會忽略，之後加 Commitment 時就用得到
       })
     });
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     
     const data = await response.json();
-
-    // 🔍 檢查是不是雙軌電路
-    console.log("matrix from backend:", data);
-    console.log("circuitData sent to backend:", circuitData);
-    console.log("circuit used in canvas:", circuit.value);
-
-    // ⭐️ 相容性判斷，確保大寫 Log 也能被讀到
     const events = data.Log || data.log; 
 
-    console.log("收到 Events:", events);
     parseEvents(events);
 
   } catch (error) {
@@ -170,7 +180,6 @@ function parseEvents(events) {
     }
   });
 
-  // 轉換 Map 為 Array
   protocolState.value.layers = Array.from(layersMap.values()).map(l => ({
     ...l,
     sumcheck: {
@@ -179,12 +188,9 @@ function parseEvents(events) {
     }
   })).sort((a, b) => a.layerIndex - b.layerIndex);
 
-  currentStep.value = 0; // 從第一步開始
+  currentStep.value = 0; 
 }
 
-// ==========================================
-// 介面控制邏輯
-// ==========================================
 const totalSteps = computed(() => {
   if (!protocolState.value.layers) return 0;
   return protocolState.value.layers.reduce((sum, layer) => {
@@ -217,8 +223,6 @@ function toggleLayer(layerIndex) {
 function nextStep() {
   if (currentStep.value < totalSteps.value - 1) {
     currentStep.value++;
-  } else {
-    console.log("已經是最後一步了", currentStep.value, totalSteps.value);
   }
 }
 
@@ -251,50 +255,17 @@ const currentActiveGates = computed(() => {
 
 const currentExplanation = computed(() => {
   const step = flattenedRounds.value[currentStep.value];
-
-  if (!step) {
-    return {
-      text: "等待驗證流程資料載入中",
-      variables: []
-    };
-  }
+  if (!step) return { text: "等待驗證流程資料載入中", variables: [] };
 
   switch (step.type) {
     case "SEND_RHO":
-      return {
-        text: "Verifier 正在用隨機數測試 Prover",
-        variables: [
-          {
-            name: "rho",
-            desc: `隨機挑戰數，用來防止作弊${step.data?.rho !== undefined ? ` (目前值: ${step.data.rho})` : ""}`
-          }
-        ]
-      };
+      return { text: "Verifier 正在用隨機數測試 Prover", variables: [{ name: "rho", desc: `隨機挑戰數${step.data?.rho !== undefined ? ` (目前值: ${step.data.rho})` : ""}` }] };
     case "SEND_S":
-      return {
-        text: "Verifier 選擇一個隨機點來檢查多項式",
-        variables: [
-          {
-            name: "s0",
-            desc: `測試多項式的隨機點${step.data?.s !== undefined ? ` (目前值: ${step.data.s})` : ""}`
-          }
-        ]
-      };
+      return { text: "Verifier 選擇一個隨機點來檢查多項式", variables: [{ name: "s0", desc: `測試隨機點${step.data?.s !== undefined ? ` (目前值: ${step.data.s})` : ""}` }] };
     case "CLAIM_VALUE":
-      return {
-        text: "Prover 提出計算結果",
-        variables: [
-          {
-            name: "claimed value",
-            desc: `Prover 聲稱的結果${step.data?.claimed !== undefined ? ` (目前值: ${step.data.claimed})` : ""}`
-          }
-        ]
-      };
+      return { text: "Prover 提出計算結果", variables: [{ name: "claimed value", desc: `Prover 聲稱的結果${step.data?.claimed !== undefined ? ` (目前值: ${step.data.claimed})` : ""}` }] };
     default:
-      return {
-        text: "正在進行 GKR 驗證",
-        variables: []
-      };
+      return { text: "正在進行 GKR 驗證", variables: [] };
   }
 });
 </script>
@@ -306,7 +277,63 @@ const currentExplanation = computed(() => {
   padding-right: 340px;
 }
 
-/* Protocol Container */
+/* ===== 隱藏值 (Witness) 區塊樣式 ===== */
+.hidden-values-wrapper {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background-color: #faf5ff; /* 淺紫底色 */
+  border: 1px dashed #d8b4fe;
+  border-radius: 8px;
+}
+
+.toggle-hidden-btn {
+  background: none;
+  border: none;
+  color: #9333ea;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.toggle-hidden-btn:hover {
+  text-decoration: underline;
+  color: #7e22ce;
+}
+
+.hidden-values-content {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.val-label {
+  font-size: 13px;
+  color: #6b21a8;
+  font-weight: 500;
+}
+
+.pill-container {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.val-pill {
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  padding: 4px 12px;
+  border-radius: 9999px; /* 圓角藥丸形狀 */
+  font-family: monospace;
+  font-weight: bold;
+  border: 1px solid #e9d5ff;
+  font-size: 14px;
+}
+/* ======================================= */
+
 .protocol-container {
   margin-top: 20px;
   display: flex;
@@ -343,26 +370,10 @@ const currentExplanation = computed(() => {
   border-left: 4px solid #2563eb;
 }
 
-.layer-title {
-  color: #1f2937;
-}
-
-.collapse-icon {
-  color: #6b7280;
-  font-size: 12px;
-}
-
-.sumcheck-content {
-  padding: 16px;
-  background: #fafafa;
-}
-
-.no-sumcheck {
-  padding: 20px;
-  text-align: center;
-  color: #9ca3af;
-  font-style: italic;
-}
+.layer-title { color: #1f2937; }
+.collapse-icon { color: #6b7280; font-size: 12px; }
+.sumcheck-content { padding: 16px; background: #fafafa; }
+.no-sumcheck { padding: 20px; text-align: center; color: #9ca3af; font-style: italic; }
 
 .chat-columns {
   display: grid;
@@ -379,42 +390,12 @@ const currentExplanation = computed(() => {
   border-radius: 6px;
 }
 
-.chat-column h4 {
-  margin-bottom: 12px;
-  font-weight: bold;
-  font-size: 1em;
-  color: #374151;
-}
-
-.chat-bubble {
-  padding: 12px;
-  margin: 8px 0;
-  border-radius: 8px;
-  line-height: 1.5;
-}
-
-.round-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  color: #6b7280;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-}
-
-.chat-bubble p {
-  margin: 0;
-}
-
-.verifier-bubble {
-  background-color: #eef2ff;
-  border-left: 3px solid #3b82f6;
-}
-
-.prover-bubble {
-  background-color: #fef2f2;
-  border-left: 3px solid #ef4444;
-}
+.chat-column h4 { margin-bottom: 12px; font-weight: bold; font-size: 1em; color: #374151; }
+.chat-bubble { padding: 12px; margin: 8px 0; border-radius: 8px; line-height: 1.5; }
+.round-label { display: block; font-size: 11px; font-weight: 600; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; }
+.chat-bubble p { margin: 0; }
+.verifier-bubble { background-color: #eef2ff; border-left: 3px solid #3b82f6; }
+.prover-bubble { background-color: #fef2f2; border-left: 3px solid #ef4444; }
 
 .controls {
   margin-top: 20px;
@@ -434,18 +415,10 @@ const currentExplanation = computed(() => {
   font-weight: 500;
 }
 
-.controls button:hover {
-  background: #1d4ed8;
-}
-
-.step-info {
-  color: #6b7280;
-  font-size: 14px;
-}
+.controls button:hover { background: #1d4ed8; }
+.step-info { color: #6b7280; font-size: 14px; }
 
 @media (max-width: 1100px) {
-  .chat-page {
-    padding-right: 20px;
-  }
+  .chat-page { padding-right: 20px; }
 }
 </style>
