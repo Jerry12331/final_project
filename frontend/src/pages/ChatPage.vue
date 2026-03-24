@@ -1,18 +1,15 @@
 <template>
   <div class="chat-page">
-    <!-- Circuit Visualization -->
     <CircuitCanvas :currentLayer="currentLayer" :activeGates="currentActiveGates" :circuit="circuit" />
 
     <ExplanationBox :explanation="currentExplanation" />
 
-    <!-- 結構化的 Protocol View -->
     <div class="protocol-container">
       <div 
         v-for="layer in protocolState.layers" 
         :key="layer.layerIndex"
         class="layer-section"
       >
-        <!-- Layer Header (可折疊) -->
         <button 
           @click="toggleLayer(layer.layerIndex)"
           class="layer-header"
@@ -22,10 +19,8 @@
           <span class="collapse-icon">{{ layer.isOpen ? '▼' : '▶' }}</span>
         </button>
 
-        <!-- Sumcheck Content (折疊區) -->
         <div v-if="layer.isOpen && layer.sumcheck" class="sumcheck-content">
           <div class="chat-columns">
-            <!-- Verifier Column -->
             <div class="chat-column verifier">
               <h4>Verifier</h4>
               <div
@@ -38,7 +33,6 @@
               </div>
             </div>
 
-            <!-- Prover Column -->
             <div class="chat-column prover">
               <h4>Prover</h4>
               <div
@@ -53,7 +47,6 @@
           </div>
         </div>
 
-        <!-- 沒有 sumcheck 的 layer -->
         <div v-if="layer.isOpen && !layer.sumcheck" class="no-sumcheck">
           No sumcheck for this layer yet.
         </div>
@@ -70,8 +63,6 @@
     </div>
   </div>
 </template>
-
-
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
@@ -94,6 +85,8 @@ onMounted(async () => {
   try {
     const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[0,1]];
     const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
+    // ⭐️ 接收從 InputPage 傳來的隱藏值
+    const hiddenData = route.query.hidden ? JSON.parse(route.query.hidden) : [];
 
     // 🔍 需要被追踪的电路数据
     circuit.value = circuitData;
@@ -105,12 +98,13 @@ onMounted(async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         circuit: circuitData,
-        inputs: inputData
+        inputs: inputData,
+        hiddenValues: hiddenData // ⭐️ 將隱藏值送往後端
       })
     });
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    // 在 ChatPage.vue 的 onMounted 裡面
+    
     const data = await response.json();
 
     // 🔍 檢查是不是雙軌電路
@@ -118,7 +112,7 @@ onMounted(async () => {
     console.log("circuitData sent to backend:", circuitData);
     console.log("circuit used in canvas:", circuit.value);
 
-    // ⭐️ 這裡增加一個相容性判斷，確保大寫 Log 也能被讀到
+    // ⭐️ 相容性判斷，確保大寫 Log 也能被讀到
     const events = data.Log || data.log; 
 
     console.log("收到 Events:", events);
@@ -130,14 +124,12 @@ onMounted(async () => {
   }
 });
 
-
 function parseEvents(events) {
   if (!events || events.length === 0) return;
 
   const layersMap = new Map();
 
   events.forEach(event => {
-    // 再次確保內部屬性的大寫相容
     const pLayer = event.ProtocolLayer ?? event.protocolLayer;
     const pRound = event.Round ?? event.round;
     const pRole = event.Role ?? event.role;
@@ -191,9 +183,8 @@ function parseEvents(events) {
 }
 
 // ==========================================
-// 介面控制邏輯 (完全不用動)
+// 介面控制邏輯
 // ==========================================
-// 1. 修正：計算總步數（所有的 Round 總和）
 const totalSteps = computed(() => {
   if (!protocolState.value.layers) return 0;
   return protocolState.value.layers.reduce((sum, layer) => {
@@ -201,36 +192,29 @@ const totalSteps = computed(() => {
   }, 0);
 });
 
-// 2. 修正：讓對話框能正確顯示
 function visibleRounds(layer) {
   if (!layer.sumcheck || !layer.sumcheck.rounds) return [];
   
-  // 計算在這一層之前已經用掉了多少步
   let previousRoundsCount = 0;
   for (const l of protocolState.value.layers) {
     if (l.layerIndex === layer.layerIndex) break;
     previousRoundsCount += l.sumcheck.rounds.length;
   }
 
-  // 目前這一步相對於這一層的偏移量
   const currentStepInThisLayer = currentStep.value - previousRoundsCount;
 
-  // 如果 currentStep 還沒到這一層，回傳空陣列
   if (currentStepInThisLayer < 0) return []; 
 
-  // 回傳該層目前應該顯示的 Round 數量
   const visibleCount = Math.min(currentStepInThisLayer + 1, layer.sumcheck.rounds.length);
   return layer.sumcheck.rounds.slice(0, visibleCount);
 }
 
-// 3. 修正：自動判斷當前處於哪一層 (讓 UI 自動展開對應的 Layer)
 function toggleLayer(layerIndex) {
   const layer = protocolState.value.layers.find(l => l.layerIndex === layerIndex);
   if (layer) layer.isOpen = !layer.isOpen;
 }
 
 function nextStep() {
-  // 只要目前步數小於總步數，就允許下一步
   if (currentStep.value < totalSteps.value - 1) {
     currentStep.value++;
   } else {
@@ -315,8 +299,6 @@ const currentExplanation = computed(() => {
 });
 </script>
 
-
-
 <style scoped>
 .chat-page {
   padding: 20px;
@@ -324,7 +306,7 @@ const currentExplanation = computed(() => {
   padding-right: 340px;
 }
 
-/* Protocol Container - 結構化的 layers */
+/* Protocol Container */
 .protocol-container {
   margin-top: 20px;
   display: flex;
@@ -332,7 +314,6 @@ const currentExplanation = computed(() => {
   gap: 12px;
 }
 
-/* Layer Section */
 .layer-section {
   border: 2px solid #e5e7eb;
   border-radius: 8px;
@@ -371,7 +352,6 @@ const currentExplanation = computed(() => {
   font-size: 12px;
 }
 
-/* Sumcheck Content */
 .sumcheck-content {
   padding: 16px;
   background: #fafafa;
@@ -384,7 +364,6 @@ const currentExplanation = computed(() => {
   font-style: italic;
 }
 
-/* Chat Columns inside each layer */
 .chat-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -437,7 +416,6 @@ const currentExplanation = computed(() => {
   border-left: 3px solid #ef4444;
 }
 
-/* Controls */
 .controls {
   margin-top: 20px;
   display: flex;
