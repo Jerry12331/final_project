@@ -4,7 +4,7 @@
 
     <div class="block">
       <h3>電路矩陣（0 = 加法, 1 = 乘法）</h3>
-      <p class="hint">範例：[[0],[0,1]] (需符合二元樹結構)</p>
+      <p class="hint">範例：[[0],[1,0]] (需符合二元樹結構)</p>
       <textarea
         v-model="circuitText"
         rows="4"
@@ -47,7 +47,7 @@ import { useRouter } from "vue-router";
 
 const router = useRouter();
 
-const circuitText = ref("[[0],[0,1]]");
+const circuitText = ref("[[0],[1,0]]");
 const inputText = ref("[3,5,2,7]");
 // ⭐️ 初始化隱藏值
 const hiddenText = ref("[0,0,0,0]"); 

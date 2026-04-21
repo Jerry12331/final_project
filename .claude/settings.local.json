@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /c/Users/User/Desktop/專題final/final_project log --oneline -15)"
+    ]
+  }
+}

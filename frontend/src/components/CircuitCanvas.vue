@@ -19,7 +19,9 @@
         :key="layerIndex"
         :class="['layer', { 'active-layer': layerIndex === currentLayer }]"
       >
-        <div class="layer-label">Layer {{ layerIndex }}</div>
+        <div class="layer-label">
+          Layer {{ layerIndex }}{{ isInputLayer(layer) ? " (Input)" : "" }}
+        </div>
         <div class="gates-row" :style="layerStyle(layer)">
           <div
             v-for="(gate, gateIndex) in layer"
@@ -62,6 +64,10 @@ const props = defineProps({
   circuit: {
     type: Array,
     default: () => []
+  },
+  inputs: {
+    type: Array,
+    default: () => []
   }
 });
 
@@ -71,9 +77,49 @@ const gateRefs = ref([]);
 const wires = ref([]);
 const hoveredGate = ref(null);
 
+function isObjectGate(gate) {
+  return gate && typeof gate === "object" && !Array.isArray(gate);
+}
+
+function normalizeNumericCircuit(circuit, inputValues) {
+  const layers = circuit.map((layer, layerIndex) => {
+    return layer.map((gate, gateIndex) => ({
+      id: `l${layerIndex}g${gateIndex}`,
+      type: gate === 0 ? "add" : "mul"
+    }));
+  });
+
+  const inputs = (inputValues.length > 0 ? inputValues : [3, 5, 2, 7]).map((value, index) => ({
+    id: `in${index}`,
+    type: "input",
+    value
+  }));
+
+  layers.push(inputs);
+
+  for (let layerIndex = 0; layerIndex < layers.length - 1; layerIndex++) {
+    const currentLayer = layers[layerIndex];
+    const nextLayer = layers[layerIndex + 1];
+
+    currentLayer.forEach((gate, gateIndex) => {
+      const left = nextLayer[gateIndex * 2]?.id;
+      const right = nextLayer[gateIndex * 2 + 1]?.id;
+      gate.inputs = [left, right].filter(Boolean);
+    });
+  }
+
+  return layers;
+}
+
 const normalizedLayers = computed(() => {
-  if (!Array.isArray(props.circuit)) return [];
-  return props.circuit;
+  if (!Array.isArray(props.circuit) || props.circuit.length === 0) return [];
+
+  const firstGate = props.circuit[0]?.[0];
+  if (isObjectGate(firstGate)) {
+    return props.circuit;
+  }
+
+  return normalizeNumericCircuit(props.circuit, Array.isArray(props.inputs) ? props.inputs : []);
 });
 
 const maxWidth = computed(() => {
@@ -108,40 +154,60 @@ function recalculateWires() {
   const layers = normalizedLayers.value;
   const segments = [];
 
-  for (let layerIndex = 0; layerIndex < layers.length - 1; layerIndex++) {
-    const upperLen = layers[layerIndex].length;
-    const lowerLen = layers[layerIndex + 1].length;
-    if (upperLen === 0 || lowerLen === 0) continue;
+  const gatePosition = new Map();
+  layers.forEach((layer, layerIndex) => {
+    layer.forEach((gate, gateIndex) => {
+      const gateId = isObjectGate(gate) ? gate.id : null;
+      if (gateId) {
+        gatePosition.set(gateId, { layerIndex, gateIndex });
+      }
+    });
+  });
 
-    for (let lowerGateIndex = 0; lowerGateIndex < lowerLen; lowerGateIndex++) {
-      const upperGateIndex = Math.floor((lowerGateIndex * upperLen) / lowerLen);
-      const upperEl = gateRefs.value[layerIndex]?.[upperGateIndex];
-      const lowerEl = gateRefs.value[layerIndex + 1]?.[lowerGateIndex];
-      if (!upperEl || !lowerEl) continue;
+  layers.forEach((layer, layerIndex) => {
+    layer.forEach((gate, gateIndex) => {
+      if (!Array.isArray(gate?.inputs) || gate.inputs.length === 0) return;
 
-      const source = gateCenter(upperEl, circuitRect);
-      const target = gateCenter(lowerEl, circuitRect);
+      const currentEl = gateRefs.value[layerIndex]?.[gateIndex];
+      if (!currentEl) return;
+      const target = gateCenter(currentEl, circuitRect);
 
-      segments.push({
-        id: `${layerIndex}-${upperGateIndex}-${layerIndex + 1}-${lowerGateIndex}`,
-        x1: source.x,
-        y1: source.y,
-        x2: target.x,
-        y2: target.y
+      gate.inputs.forEach((inputId) => {
+        const parent = gatePosition.get(inputId);
+        if (!parent) return;
+
+        const parentEl = gateRefs.value[parent.layerIndex]?.[parent.gateIndex];
+        if (!parentEl) return;
+
+        const source = gateCenter(parentEl, circuitRect);
+        segments.push({
+          id: `${inputId}-${gate.id}`,
+          x1: source.x,
+          y1: source.y,
+          x2: target.x,
+          y2: target.y
+        });
       });
-    }
-  }
+    });
+  });
 
   wires.value = segments;
 }
 
 function gateType(gate) {
   const type = typeof gate === "object" ? gate.type : gate;
+  if (type === "input") return "input";
   return type === 0 || type === "add" ? "add" : "mul";
 }
 
 function gateSymbol(gate) {
-  return gateType(gate) === "add" ? "+" : "×";
+  const type = gateType(gate);
+  if (type === "input") return gate?.value ?? "?";
+  return type === "add" ? "+" : "×";
+}
+
+function isInputLayer(layer) {
+  return Array.isArray(layer) && layer.length > 0 && layer.every((gate) => gateType(gate) === "input");
 }
 
 function setHoveredGate(gate, layerIndex, gateIndex) {
@@ -157,7 +223,7 @@ function isActiveGate(layerIndex, gateIndex) {
 }
 
 function tooltipGateType(gate, layerIndex) {
-  if (layerIndex === normalizedLayers.value.length - 1) return "INPUT";
+  if (gateType(gate) === "input" || layerIndex === normalizedLayers.value.length - 1) return "INPUT";
   return gateType(gate).toUpperCase();
 }
 
@@ -178,14 +244,7 @@ function tooltipInputs(gate, layerIndex, gateIndex) {
     return gate.inputs.join(", ");
   }
 
-  const nextLayer = normalizedLayers.value[layerIndex + 1];
-  if (!nextLayer) return "";
-
-  const left = gateIndex * 2;
-  const right = gateIndex * 2 + 1;
-  if (right >= nextLayer.length) return "";
-
-  return `Gate ${left + 1} + Gate ${right + 1}`;
+  return "";
 }
 
 async function syncWires() {
@@ -313,6 +372,13 @@ onBeforeUnmount(() => {
 
 .gate.mul {
   background: #fde68a;
+}
+
+.gate.input {
+  background: #dcfce7;
+  border: 2px solid #16a34a;
+  color: #166534;
+  font-size: 18px;
 }
 
 .gate.active {

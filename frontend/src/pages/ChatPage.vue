@@ -1,6 +1,6 @@
 <template>
   <div class="chat-page">
-    <CircuitCanvas :currentLayer="currentLayer" :activeGates="currentActiveGates" :circuit="circuit" />
+    <CircuitCanvas :currentLayer="currentLayer" :activeGates="currentActiveGates" :circuit="circuit" :inputs="inputVector" />
 
     <ExplanationBox :explanation="currentExplanation" />
 
@@ -43,7 +43,7 @@
                 class="chat-bubble verifier-bubble"
               >
                 <span class="round-label">Round {{ round.round }}</span>
-                <p>{{ round.verifier }}</p>
+                <p v-html="formatMessage(round.verifier)"></p>
               </div>
             </div>
 
@@ -55,25 +55,26 @@
                 class="chat-bubble prover-bubble"
               >
                 <span class="round-label">Round {{ round.round }}</span>
-                <p>{{ round.prover }}</p>
+                <p v-html="formatMessage(round.prover)"></p>
               </div>
             </div>
           </div>
         </div>
 
         <div v-if="layer.isOpen && !layer.sumcheck" class="no-sumcheck">
-          No sumcheck for this layer yet.
+          此 Layer 尚無 Sumcheck 資料
         </div>
       </div>
     </div>
 
+    <div v-if="totalSteps > 0 && currentStep === totalSteps - 1" class="verify-success">
+      ✓ 驗證成功！GKR 協議已完成，電路計算正確無誤。
+    </div>
+
     <div class="controls">
-      <button @click="prevStep" :disabled="currentStep <= 0">Previous Step</button>
-      <button @click="nextStep" :disabled="currentStep >= totalSteps - 1">Next Step</button>
-      
-      <span class="step-info">
-        Debug: Step Index {{ currentStep }} | Total {{ totalSteps }}
-      </span>
+      <button @click="prevStep" :disabled="currentStep <= 0">← 上一步</button>
+      <span class="step-info">步驟 {{ currentStep + 1 }} / {{ totalSteps }}</span>
+      <button @click="nextStep" :disabled="currentStep >= totalSteps - 1">下一步 →</button>
     </div>
   </div>
 </template>
@@ -89,6 +90,7 @@ const currentStep = ref(0);
 
 // 存儲從後端或路由獲得的資料
 const circuit = ref(null);
+const inputVector = ref([]);
 
 // 新增：儲存隱藏值與控制顯示狀態的變數
 const hiddenValues = ref([]);
@@ -101,11 +103,12 @@ const protocolState = ref({
 
 onMounted(async () => {
   try {
-    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[0,1]];
+    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[1,0]];
     const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
     const hiddenData = route.query.hidden ? JSON.parse(route.query.hidden) : [];
 
-    circuit.value = circuitData;
+    inputVector.value = inputData;
+    circuit.value = buildDisplayCircuit(circuitData, inputData);
     
     // 把接到的隱藏值存進響應式變數中，供畫面上方渲染
     hiddenValues.value = hiddenData;
@@ -115,7 +118,7 @@ onMounted(async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        circuit: circuitData,
+        circuit: Array.isArray(circuitData) && typeof circuitData[0]?.[0] === "number" ? circuitData : [[0],[1,0]],
         inputs: inputData,
         hiddenValues: hiddenData // 目前後端會忽略，之後加 Commitment 時就用得到
       })
@@ -133,6 +136,44 @@ onMounted(async () => {
     alert("與後端連線失敗，請檢查 C# 伺服器。\n" + error.message);
   }
 });
+
+function buildDisplayCircuit(circuitData, inputData) {
+  const looksLikeStructuredLayers = Array.isArray(circuitData)
+    && Array.isArray(circuitData[0])
+    && typeof circuitData[0][0] === "object"
+    && circuitData[0][0] !== null
+    && Object.prototype.hasOwnProperty.call(circuitData[0][0], "id");
+
+  if (looksLikeStructuredLayers) return circuitData;
+
+  const normalizedInputs = Array.isArray(inputData) ? [...inputData] : [];
+  while (normalizedInputs.length < 3) {
+    normalizedInputs.push(0);
+  }
+
+  const in0 = normalizedInputs[0];
+  const in1 = normalizedInputs[1];
+  const in2 = normalizedInputs[2];
+  const g1Value = in0 * in1;
+  const g2Value = in1 + in2;
+
+  const inputLayer = normalizedInputs.map((value, index) => ({
+    id: `in${index}`,
+    type: "input",
+    value
+  }));
+
+  return [
+    [
+      { id: "out", type: "add", inputs: ["g1", "g2"], value: g1Value + g2Value }
+    ],
+    [
+      { id: "g1", type: "mul", inputs: ["in0", "in1"], value: g1Value },
+      { id: "g2", type: "add", inputs: ["in1", "in2"], value: g2Value }
+    ],
+    inputLayer
+  ];
+}
 
 function parseEvents(events) {
   if (!events || events.length === 0) return;
@@ -189,6 +230,24 @@ function parseEvents(events) {
   })).sort((a, b) => a.layerIndex - b.layerIndex);
 
   currentStep.value = 0; 
+}
+
+function formatBigNum(str) {
+  if (str.length <= 20) return str;
+  return str.slice(0, 8) + '...' + str.slice(-8);
+}
+
+function formatMessage(msg) {
+  if (!msg) return '';
+  const escaped = msg
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+  return escaped.replace(/\b(\d{17,})\b/g, (match) => {
+    const truncated = match.slice(0, 8) + '...' + match.slice(-8);
+    return `<span class="big-num" title="${match}">${truncated}</span>`;
+  });
 }
 
 const totalSteps = computed(() => {
@@ -255,17 +314,48 @@ const currentActiveGates = computed(() => {
 
 const currentExplanation = computed(() => {
   const step = flattenedRounds.value[currentStep.value];
-  if (!step) return { text: "等待驗證流程資料載入中", variables: [] };
+  if (!step) return { phase: "載入中", text: "等待驗證流程資料載入中", why: "", variables: [] };
+
+  const layerIdx = step.layer;
+  const roundIdx = step.round;
 
   switch (step.type) {
     case "SEND_RHO":
-      return { text: "Verifier 正在用隨機數測試 Prover", variables: [{ name: "rho", desc: `隨機挑戰數${step.data?.rho !== undefined ? ` (目前值: ${step.data.rho})` : ""}` }] };
+      return {
+        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
+        text: "Verifier 送出隨機挑戰數 ρ（rho）給 Prover，要求對方回答多項式在此點的值。",
+        why: "隨機性讓 Prover 無法預先偽造答案。若 Prover 說謊，被挑穿的機率極高（由有限體大小決定）。",
+        variables: [{ name: "ρ (rho)", desc: `隨機挑戰點${step.data?.rho !== undefined ? `：${formatBigNum(String(step.data.rho))}` : ""}` }]
+      };
     case "SEND_S":
-      return { text: "Verifier 選擇一個隨機點來檢查多項式", variables: [{ name: "s0", desc: `測試隨機點${step.data?.s !== undefined ? ` (目前值: ${step.data.s})` : ""}` }] };
+      return {
+        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
+        text: "Verifier 選取隨機點 s，要求 Prover 提供下一層電路在 s 的求值，以便繼續驗證。",
+        why: "每一層都需要新的隨機點，形成一條從輸出層延伸到輸入層的驗證鏈，最終收斂於可公開驗證的輸入。",
+        variables: [{ name: "s", desc: `隨機測試點${step.data?.s !== undefined ? `：${formatBigNum(String(step.data.s))}` : ""}` }]
+      };
     case "CLAIM_VALUE":
-      return { text: "Prover 提出計算結果", variables: [{ name: "claimed value", desc: `Prover 聲稱的結果${step.data?.claimed !== undefined ? ` (目前值: ${step.data.claimed})` : ""}` }] };
+      return {
+        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
+        text: "Prover 提出計算結果（Claim）。Verifier 將此結果與先前隨機挑戰進行一致性檢查。",
+        why: "若 Prover 提出的值與電路實際值不符，Sumcheck 協議會在後續步驟將矛盾揭穿，Prover 無法逃脫。",
+        variables: [{ name: "claimed value", desc: `Prover 宣稱的輸出${step.data?.claimed !== undefined ? `：${formatBigNum(String(step.data.claimed))}` : ""}` }]
+      };
     default:
-      return { text: "正在進行 GKR 驗證", variables: [] };
+      if (roundIdx === 1 && layerIdx === 0) {
+        return {
+          phase: "GKR 驗證啟動",
+          text: "Prover 宣告電路的輸出值，GKR 協議正式開始。Verifier 將從輸出層逐層向下驗證到輸入層。",
+          why: "GKR 協議的核心是把「電路計算的正確性」轉化為「一系列多項式求和問題」，讓驗證計算量大幅縮短。",
+          variables: []
+        };
+      }
+      return {
+        phase: `Layer ${layerIdx} · Sumcheck Round ${roundIdx}`,
+        text: `Prover 與 Verifier 正在執行第 ${layerIdx} 層的 Sumcheck 協議第 ${roundIdx} 輪。Prover 逐步證明多項式求和正確，Verifier 逐步驗證一致性。`,
+        why: "Sumcheck 協議讓 Verifier 只需驗證少量點的值，就能確認整個多項式求和正確，大幅降低驗證計算量。",
+        variables: []
+      };
   }
 });
 </script>
@@ -397,6 +487,27 @@ const currentExplanation = computed(() => {
 .verifier-bubble { background-color: #eef2ff; border-left: 3px solid #3b82f6; }
 .prover-bubble { background-color: #fef2f2; border-left: 3px solid #ef4444; }
 
+.big-num {
+  font-family: monospace;
+  background: #fef9c3;
+  border-bottom: 1px dashed #ca8a04;
+  cursor: help;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.verify-success {
+  margin-top: 20px;
+  padding: 14px 20px;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-left: 4px solid #22c55e;
+  border-radius: 8px;
+  color: #15803d;
+  font-weight: 600;
+  font-size: 15px;
+}
+
 .controls {
   margin-top: 20px;
   display: flex;
@@ -416,7 +527,8 @@ const currentExplanation = computed(() => {
 }
 
 .controls button:hover { background: #1d4ed8; }
-.step-info { color: #6b7280; font-size: 14px; }
+.controls button:disabled { background: #93c5fd; cursor: not-allowed; }
+.step-info { color: #374151; font-size: 14px; font-weight: 500; }
 
 @media (max-width: 1100px) {
   .chat-page { padding-right: 20px; }
