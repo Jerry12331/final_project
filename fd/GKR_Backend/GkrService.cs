@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using mcl;
 
 namespace GKR_Backend.Services
 {
     public class GkrService
     {
-        // ⭐️ 改用 GkrEvent 串列
         private List<GkrEvent> _events;
-
         private int _currentLayer = 0;
         private int _currentRound = 1;
 
@@ -17,6 +16,7 @@ namespace GKR_Backend.Services
             _events = new List<GkrEvent>();
             try
             {
+                MCL.Init(MCL.BLS12_381);
                 RunProtocolInternal(request);
             }
             catch (Exception ex)
@@ -27,51 +27,72 @@ namespace GKR_Backend.Services
             return _events;
         }
 
-        private static Dictionary<string, int> Data(params (string key, int value)[] items)
-        {
-            return items.ToDictionary(item => item.key, item => item.value);
-        }
-
-        private void AddProverEvent(string msg, string type = "PROVER_MESSAGE", Dictionary<string, int>? data = null)
+        #region 事件發送輔助方法
+        private void AddProverEvent(string msg, string type = "PROVER_MESSAGE", object? data = null)
         {
             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Prover", Type = type, Message = msg, Data = data });
         }
 
-        private void AddVerifierEvent(string msg, bool incrementRound = false, string type = "VERIFIER_MESSAGE", Dictionary<string, int>? data = null)
+        private void AddVerifierEvent(string msg, bool incrementRound = false)
         {
-            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Type = type, Message = msg, Data = data });
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Message = msg });
             if (incrementRound) _currentRound++;
         }
 
-        private void AddSystemEvent(string msg, string type = "SYSTEM_MESSAGE", Dictionary<string, int>? data = null)
+        private void AddSystemEvent(string msg)
         {
-             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "System", Type = type, Message = msg, Data = data });
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "System", Message = msg });
         }
 
+        private void AddCommitmentEvent(string label, string commitmentHex)
+        {
+            _events.Add(new GkrEvent 
+            { 
+                ProtocolLayer = _currentLayer, 
+                Round = _currentRound, 
+                Role = "Prover", 
+                Type = "CLAIM_VALUE", 
+                Message = $"{label} = {commitmentHex}",
+                Data = new Dictionary<string, string> { { "commitment", commitmentHex } }
+            });
+        }
+        #endregion
+
+        #region MCL 有限體運算 Helper
+        private static MCL.Fr ToFr(int i) { var f = new MCL.Fr(); f.SetInt(i); return f; }
+        private static MCL.Fr FrAdd(MCL.Fr a, MCL.Fr b) { var res = new MCL.Fr(); MCL.Add(ref res, in a, in b); return res; }
+        private static MCL.Fr FrSub(MCL.Fr a, MCL.Fr b) { var res = new MCL.Fr(); MCL.Sub(ref res, in a, in b); return res; }
+        private static MCL.Fr FrMul(MCL.Fr a, MCL.Fr b) { var res = new MCL.Fr(); MCL.Mul(ref res, in a, in b); return res; }
+        private static int[] IntToBinary(int n, int len)
+        {
+            int[] bits = new int[len];
+            for (int i = 0; i < len; i++) bits[i] = (n >> i) & 1;
+            return bits;
+        }
+        #endregion
 
         private void RunProtocolInternal(GkrRequest req)
         {
-            int mod = req.Mod;
-            int[][] rawCircuit = req.Circuit;
-            int[] inputs = req.Inputs;
+            int[][] rawCircuit = req.Circuit ?? new int[0][];
+            int[] inputs = req.Inputs ?? new int[0];
+            int[] hiddenValues = req.HiddenValues ?? new int[inputs.Length];
 
             int totalLayers = rawCircuit.Length + 1;
             Node[][] circuit = new Node[totalLayers][];
 
-            _currentLayer = 0; 
-            _currentRound = 1; 
-            AddSystemEvent($"嘿，大家好！我們要開始 GKR 協議了。模數是 {mod}，總共有 {totalLayers} 層電路。");
+            _currentLayer = 0;
+            _currentRound = 1;
+
+            AddSystemEvent($"GKR + Multilinear KZG 系統啟動");
+            AddSystemEvent($"Public Inputs: [{string.Join(", ", inputs)}]");
+            AddSystemEvent($"Hidden Witness: [{string.Join(", ", hiddenValues)}]");
 
             for (int i = 0; i < totalLayers; i++)
             {
                 if (i == totalLayers - 1)
                 {
                     circuit[i] = new Node[inputs.Length];
-                    for (int j = 0; j < inputs.Length; j++)
-                    {
-                        circuit[i][j] = new Node(inputs[j], j);
-                    }
-                    AddSystemEvent($"第 {i} 層是輸入層，有 {inputs.Length} 個輸入值：{string.Join(", ", inputs)}");
+                    for (int j = 0; j < inputs.Length; j++) circuit[i][j] = new Node(ToFr(inputs[j]), j);
                 }
                 else
                 {
@@ -82,7 +103,6 @@ namespace GKR_Backend.Services
                         circuit[i][j] = new Node(j);
                         circuit[i][j].set_sign(layerConfig[j]);
                     }
-                    AddSystemEvent($"第 {i} 層有 {layerConfig.Length} 個閘門，配置是：{string.Join(", ", layerConfig)}（0=加法，1=乘法）");
                 }
             }
 
@@ -90,171 +110,140 @@ namespace GKR_Backend.Services
             {
                 for (int j = 0; j < circuit[i].Length; j++)
                 {
-                    int leftIdx = j * 2;
-                    int rightIdx = j * 2 + 1;
-
+                    int leftIdx = j * 2, rightIdx = j * 2 + 1;
                     if (leftIdx < circuit[i + 1].Length && rightIdx < circuit[i + 1].Length)
                     {
                         circuit[i][j].set_left(circuit[i + 1][leftIdx]);
                         circuit[i][j].set_right(circuit[i + 1][rightIdx]);
-                    }
-                    else
-                    {
-                        // ⭐️ 加上防呆機制：如果找不到節點，丟出明確的錯誤，而不是讓程式 NullReferenceException
-                        throw new Exception($"電路結構不合法！第 {i} 層的第 {j} 個 Gate 找不到下一層的輸入（需要 Index {leftIdx} 與 {rightIdx}，但下一層只有 {circuit[i + 1].Length} 個）。請確保輸入矩陣是嚴格的二元樹結構 (例如: 1 -> 2 -> 4)。");
                     }
                 }
             }
 
             int[] gateNum = new int[totalLayers];
             int[] bitsLen = new int[totalLayers];
-
             for (int i = 0; i < totalLayers; i++)
             {
                 gateNum[i] = circuit[i].Length;
                 bitsLen[i] = (gateNum[i] == 1) ? 1 : (int)Math.Ceiling(Math.Log(gateNum[i], 2));
             }
-
-            AddSystemEvent($"計算每層的值... 從最底層開始往上算。");
-
             for (int i = totalLayers - 1; i >= 0; i--)
             {
-                for (int j = 0; j < circuit[i].Length; j++)
-                {
-                    circuit[i][j].calculate_value();
-                }
+                foreach (var node in circuit[i]) node.calculate_value();
             }
 
-            Prover prover = new Prover(totalLayers, gateNum, bitsLen, mod, circuit);
-            Verifier verifier = new Verifier(mod);
+            AddSystemEvent("執行 Multilinear KZG Setup 與 Commitment...");
+            MultilinearKZG kzg = new MultilinearKZG(bitsLen[totalLayers - 1]);
+            MCL.Fr[] inputValues = circuit[totalLayers - 1].Select(n => n.value).ToArray();
+            var commitment = kzg.Commit(inputValues);
+            
+            AddProverEvent("Prover 對輸入層 (Layer 2) 進行 KZG 承諾。");
+            AddCommitmentEvent("Input Commitment (G1)", commitment.GetStr(16));
 
-            int[] fixed_var = new int[bitsLen[0]];
+            Prover prover = new Prover(totalLayers, gateNum, bitsLen, circuit);
+            Verifier verifier = new Verifier();
+
+            MCL.Fr[] fixed_var = new MCL.Fr[bitsLen[0]];
             var claimed_D = prover.claimed_D();
 
             _currentLayer = 0;
             _currentRound = 1;
 
-            string outputVals = "";
-            for (int i = 0; i < gateNum[0]; i++) outputVals += claimed_D(IntToBinary(i, bitsLen[0])) + " ";
-            AddProverEvent($"先發送整個電路的輸出值：{outputVals}。這是用 D 多項式算出來的，每個輸入對應的結果。");
+            string outputVals = string.Join(" ", circuit[0].Select(n => n.value.GetStr(10)));
+            AddProverEvent($"send D() and the circuit outputs: {outputVals}");
 
             for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-            AddVerifierEvent($"我隨機選了一些固定變數：{string.Join(", ", fixed_var)}，用來測試 D 多項式。");
+            AddVerifierEvent($"send fixed_var = " + string.Join(", ", fixed_var.Select(f => f.GetStr(10))));
 
-            int claimed = claimed_D(fixed_var);
-            AddProverEvent($"用這些固定變數算 D 多項式的值，結果是 {claimed}。這就是聲稱的答案！", "CLAIM_VALUE", Data(("claimed", claimed)));
-            
-            _currentRound++; 
+            MCL.Fr claimed = claimed_D(fixed_var);
+            AddProverEvent($"claimed D(fixed_var) = {claimed.GetStr(10)}");
+            _currentRound++;
 
             for (int now_layer = 0; now_layer < totalLayers - 1; now_layer++)
             {
-                _currentLayer = now_layer + 1; // 為了對齊前端視覺，把 Sumcheck 定義在下一層
-                _currentRound = 1;         
+                _currentLayer = now_layer + 1;
+                _currentRound = 1;
 
-                AddSystemEvent($"現在進入第 {now_layer + 1} 層的 Sumcheck！Prover 要證明他的聲稱是對的。");
-
-                int maskSum = prover.maskSum(now_layer, fixed_var);
-                AddProverEvent($"計算了 maskSum（遮罩和），這是把所有相關的多項式加起來，結果是 {maskSum}。");
-
-                int rho = verifier.pickRandom();
-                AddVerifierEvent($"我隨機選了一個 rho = {rho}，用來檢查 Sumcheck。", incrementRound: true, type: "SEND_RHO", data: Data(("rho", rho))); 
-
-                claimed = Mod(claimed + Mod(rho * maskSum, mod), mod);
-                AddSystemEvent($"更新聲稱值：原來的 {claimed - Mod(rho * maskSum, mod)} 加上 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，結果是 {claimed}。");
+                MCL.Fr maskSum = prover.maskSum(now_layer, fixed_var);
+                AddProverEvent($"send maskSum = {maskSum.GetStr(10)}");
                 
+                MCL.Fr rho = verifier.pickRandom();
+                AddVerifierEvent($"send rho = {rho.GetStr(10)}", true);
+
+                claimed = FrAdd(claimed, FrMul(rho, maskSum));
+
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2; i++)
                 {
                     var G = prover.make_G(fixed_var, now_layer, rho);
+                    MCL.Fr term = FrAdd(G(ToFr(0)), G(ToFr(1)));
 
-                    int g0 = G(0);
-                    int g1 = G(1);
-                    int sumTerm = Mod((long)g0 + (long)g1, mod);
-                    AddProverEvent($"計算了 G 多項式在 0 和 1 的值：G(0) = {g0}, G(1) = {g1}，加起來是 {sumTerm}。");
+                    if (!claimed.Equals(term)) { AddVerifierEvent("V: Sumcheck Failed!"); return; }
 
-                    if (sumTerm != claimed)
-                    {
-                        AddVerifierEvent($"檢查失敗！G(0) + G(1) = {sumTerm}，但聲稱的是 {claimed}，不一樣啊！");
-                        return;
-                    }
-
-                    int s = verifier.pickRandom();
-                    AddVerifierEvent($"檢查通過！G(0)+G(1) 等於聲稱值。現在我隨機選 s{i} = {s}，繼續下一輪。", type: "SEND_S", data: Data(("s", s), ("sIndex", i)));
+                    MCL.Fr s = verifier.pickRandom();
+                    AddVerifierEvent($"send s{i} = {s.GetStr(10)}");
                     
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
-                    
-                    AddProverEvent($"用 s{i} = {s} 算 G 多項式的值，得到新的聲稱 {claimed}。", "CLAIM_VALUE", Data(("claimed", claimed), ("fromS", s), ("sIndex", i)));
-                    _currentRound++; 
+                    AddProverEvent($"claimed G{i}(s{i}) = {claimed.GetStr(10)}");
+                    _currentRound++;
 
                     if (now_layer == totalLayers - 2 && i == bitsLen[now_layer + 1] * 2 - 1)
                     {
-                        AddSystemEvent($"最後一輪！要檢查輸入層的多項式。");
-
                         var input_poly = verifier.make_input(circuit[totalLayers - 1], bitsLen[totalLayers - 1]);
-                        
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        AddProverEvent($"最後的 maskSum（考慮所有固定變數）= {maskSum}。");
+                        AddProverEvent($"send maskSum with fixed_var = {maskSum.GetStr(10)}");
                         
-                        claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
-                        AddSystemEvent($"最終聲稱值：原來的 {claimed + Mod(rho * maskSum, mod)} 減去 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，結果是 {claimed}。");
+                        claimed = FrSub(claimed, FrMul(rho, maskSum));
 
-                        int[] a = fixed_var.Take(bitsLen[totalLayers - 2]).ToArray();
-                        int[] b = fixed_var.Skip(bitsLen[totalLayers - 2]).Take(bitsLen[totalLayers - 1]).ToArray();
-                        int[] c = fixed_var.Skip(bitsLen[totalLayers - 2] + bitsLen[totalLayers - 1]).Take(bitsLen[totalLayers - 1]).ToArray();
+                        // ⭐️ 修正 1：不再轉回 int，直接使用 MCL.Fr 陣列
+                        MCL.Fr[] a = fixed_var.Take(bitsLen[totalLayers - 2]).ToArray();
+                        MCL.Fr[] b = fixed_var.Skip(bitsLen[totalLayers - 2]).Take(bitsLen[totalLayers - 1]).ToArray();
+                        MCL.Fr[] c = fixed_var.Skip(bitsLen[totalLayers - 2] + bitsLen[totalLayers - 1]).Take(bitsLen[totalLayers - 1]).ToArray();
 
-                        long final_addPolyVal = AddPoly(totalLayers - 2, circuit, mod)(a, b, c);
-                        long final_mulPolyVal = MulPoly(totalLayers - 2, circuit, mod)(a, b, c);
-                        long inputB = input_poly(b);
-                        long inputC = input_poly(c);
-                        long final_part1 = Mod(final_addPolyVal * Mod(inputB + inputC, mod), mod);
-                        long final_part2 = Mod(final_mulPolyVal * Mod(inputB * inputC, mod), mod);
-                        long finalTerm = Mod(final_part1 + final_part2, mod);
+                        MCL.Fr final_addPolyVal = AddPoly(totalLayers - 2, circuit)(a, b, c);
+                        MCL.Fr final_mulPolyVal = MulPoly(totalLayers - 2, circuit)(a, b, c);
+                        
+                        MCL.Fr b_fr = input_poly(b);
+                        MCL.Fr c_fr = input_poly(c);
 
-                        AddVerifierEvent($"最終檢查：加法多項式值 {final_addPolyVal} * (輸入B {inputB} + 輸入C {inputC}) = {final_part1}，乘法多項式值 {final_mulPolyVal} * (輸入B * 輸入C = {inputB * inputC}) = {final_part2}，加起來是 {finalTerm}。");
+                        MCL.Fr final_part1 = FrMul(final_addPolyVal, FrAdd(b_fr, c_fr));
+                        MCL.Fr final_part2 = FrMul(final_mulPolyVal, FrMul(b_fr, c_fr));
+                        term = FrAdd(final_part1, final_part2);
 
-                        if (claimed != finalTerm) { 
-                            AddVerifierEvent($"最終檢查失敗！聲稱 {claimed} 不等於計算結果 {finalTerm}。"); 
-                            return; 
-                        }
-                        AddVerifierEvent("太棒了！最終檢查通過，Verifier 相信 D() 是正確的！");
+                        if (!claimed.Equals(term)) { AddVerifierEvent("V: final check failed"); return; }
+                        
+                        AddVerifierEvent("sum check passed, Verifier can trust D()");
+                        AddSystemEvent("GKR 驗證成功，執行 KZG 開放驗證...");
                         break;
                     }
 
-                    if (i == bitsLen[now_layer + 1] * 2 - 1) 
+                    if (i == bitsLen[now_layer + 1] * 2 - 1)
                     {
                         var claimed_poly = prover.make_q(now_layer, fixed_var);
-                        AddProverEvent($"發送了聲稱的多項式 q{now_layer + 1}，它的值在 0 和 1 會是 q(0)={claimed_poly(0)}, q(1)={claimed_poly(1)}。");
+                        AddProverEvent($"send claimed_poly q{now_layer + 1}");
                         
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        AddProverEvent($"還有 maskSum = {maskSum}。");
+                        AddProverEvent($"send maskSum = {maskSum.GetStr(10)}");
                         
-                        claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
-                        AddSystemEvent($"更新聲稱：減去 rho * maskSum = {rho} * {maskSum} = {Mod(rho * maskSum, mod)}，新聲稱是 {claimed}。");
+                        claimed = FrSub(claimed, FrMul(rho, maskSum));
 
-                        int[] a = fixed_var.Take(bitsLen[now_layer]).ToArray();
-                        int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
-                        int[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
+                        // ⭐️ 修正 2：不再轉回 int，直接使用 MCL.Fr 陣列
+                        MCL.Fr[] a = fixed_var.Take(bitsLen[now_layer]).ToArray();
+                        MCL.Fr[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
+                        MCL.Fr[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
 
-                        long addPolyVal = AddPoly(now_layer, circuit, mod)(a, b, c);
-                        long mulPolyVal = MulPoly(now_layer, circuit, mod)(a, b, c);
-                        long q0 = claimed_poly(0);
-                        long q1 = claimed_poly(1);
-                        long part1 = Mod(addPolyVal * Mod(q0 + q1, mod), mod);
-                        long part2 = Mod(mulPolyVal * Mod(q0 * q1, mod), mod);
-                        long intermediateTerm = Mod(part1 + part2, mod);
+                        MCL.Fr addPolyVal = AddPoly(now_layer, circuit)(a, b, c);
+                        MCL.Fr mulPolyVal = MulPoly(now_layer, circuit)(a, b, c);
+                        
+                        MCL.Fr part1 = FrMul(addPolyVal, FrAdd(claimed_poly(ToFr(0)), claimed_poly(ToFr(1))));
+                        MCL.Fr part2 = FrMul(mulPolyVal, FrMul(claimed_poly(ToFr(0)), claimed_poly(ToFr(1))));
+                        term = FrAdd(part1, part2);
 
-                        AddVerifierEvent($"中間檢查：加法多項式 {addPolyVal} * (q(0)+q(1)={q0 + q1}) = {part1}，乘法多項式 {mulPolyVal} * (q(0)*q(1)={q0 * q1}) = {part2}，總和 {intermediateTerm}。");
+                        if (!claimed.Equals(term)) { AddVerifierEvent("V: intermediate check failed"); return; }
 
-                        if (claimed != intermediateTerm) { 
-                            AddVerifierEvent("中間檢查失敗！"); 
-                            return; 
-                        }
-
-                        int random_var = verifier.pickRandom();
-                        AddVerifierEvent($"中間檢查通過！選下一個隨機數 r{now_layer + 1} = {random_var}。", incrementRound: true);
+                        MCL.Fr random_var = verifier.pickRandom();
+                        AddVerifierEvent($"sum check passed. send r{now_layer + 1} = {random_var.GetStr(10)}", true);
                         
                         claimed = claimed_poly(random_var);
-                        AddProverEvent($"用 r{now_layer + 1} 算 q 多項式，得到新聲稱 {claimed}。", "CLAIM_VALUE", Data(("claimed", claimed), ("r", random_var), ("layer", now_layer + 1)));
 
                         var l_poly = prover.make_l(now_layer, fixed_var);
                         Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
@@ -262,281 +251,338 @@ namespace GKR_Backend.Services
                         {
                             fixed_var[j] = l_poly(random_var)[j];
                         }
-                        AddSystemEvent($"更新固定變數：用 l 多項式算出新的變數 {string.Join(", ", fixed_var)}。");
                     }
                 }
             }
         }
 
-        private static int[] IntToBinary(int n, int len)
+        #region 電路多項式 Helper (升級接受 MCL.Fr 陣列)
+        private static Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr> AddPoly(int layer, Node[][] circuit)
         {
-            int[] bits = new int[len];
-            for (int i = 0; i < len; i++) bits[i] = (n >> i) & 1;
-            return bits;
-        }
-
-        private static int Mod(long a, int mod)
-        {
-            int res = (int)(a % mod);
-            if (res < 0) res += mod;
-            return res;
-        }
-
-        private static Func<int[], int[], int[], int> AddPoly(int layer, Node[][] circuit, int mod)
-        {
-            return (int[] a, int[] b, int[] c) =>
+            return (MCL.Fr[] a, MCL.Fr[] b, MCL.Fr[] c) =>
             {
-                long s = 0;
+                MCL.Fr s = ToFr(0);
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 0)
                     {
-                        long term = 1;
+                        MCL.Fr term = ToFr(1);
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? a[j] : (1 - a[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? a[j] : FrSub(ToFr(1), a[j]);
+                            term = FrMul(term, val);
                         }
-                        index = IntToBinary(circuit[layer][i].left.index, b.Length);
+                        index = IntToBinary(circuit[layer][i].left?.index ?? 0, b.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? b[j] : (1 - b[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? b[j] : FrSub(ToFr(1), b[j]);
+                            term = FrMul(term, val);
                         }
-                        index = IntToBinary(circuit[layer][i].right.index, c.Length);
+                        index = IntToBinary(circuit[layer][i].right?.index ?? 0, c.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? c[j] : (1 - c[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? c[j] : FrSub(ToFr(1), c[j]);
+                            term = FrMul(term, val);
                         }
-                        s = Mod(s + term, mod);
+                        s = FrAdd(s, term);
                     }
                 }
-                return (int)s;
+                return s;
             };
         }
 
-        private static Func<int[], int[], int[], int> MulPoly(int layer, Node[][] circuit, int mod)
+        private static Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr> MulPoly(int layer, Node[][] circuit)
         {
-            return (int[] a, int[] b, int[] c) =>
+            return (MCL.Fr[] a, MCL.Fr[] b, MCL.Fr[] c) =>
             {
-                long s = 0;
+                MCL.Fr s = ToFr(0);
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 1)
                     {
-                        long term = 1;
+                        MCL.Fr term = ToFr(1);
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? a[j] : (1 - a[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? a[j] : FrSub(ToFr(1), a[j]);
+                            term = FrMul(term, val);
                         }
-                        index = IntToBinary(circuit[layer][i].left.index, b.Length);
+                        index = IntToBinary(circuit[layer][i].left?.index ?? 0, b.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? b[j] : (1 - b[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? b[j] : FrSub(ToFr(1), b[j]);
+                            term = FrMul(term, val);
                         }
-                        index = IntToBinary(circuit[layer][i].right.index, c.Length);
+                        index = IntToBinary(circuit[layer][i].right?.index ?? 0, c.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            long val = (index[j] == 1) ? c[j] : (1 - c[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (index[j] == 1) ? c[j] : FrSub(ToFr(1), c[j]);
+                            term = FrMul(term, val);
                         }
-                        s = Mod(s + term, mod);
+                        s = FrAdd(s, term);
                     }
                 }
-                return (int)s;
+                return s;
             };
         }
+        #endregion
 
+        #region 演算法核心類別
         class Node
         {
-            public int? value;
-            public int sign;
-            public Node left;
-            public Node right;
-            public int index;
-
+            public MCL.Fr value;
+            public bool hasValue = false;
+            public int sign, index;
+            public Node? left, right;
+            
             public Node(int index) { this.index = index; }
-            public Node(int value, int index) { this.index = index; this.value = value; }
+            public Node(MCL.Fr value, int index) { this.index = index; this.value = value; this.hasValue = true; }
+            
             public void set_sign(int sign) => this.sign = sign;
             public void set_left(Node left) => this.left = left;
             public void set_right(Node right) => this.right = right;
+            
             public void calculate_value()
             {
-                if (left == null && right == null) return;
-                if (left.value == null) left.calculate_value();
-                if (right.value == null) right.calculate_value();
-                if (sign == 0) value = left.value + right.value;
-                else if (sign == 1) value = left.value * right.value;
+                if (hasValue) return;
+                if (left == null || right == null) return;
+                if (!left.hasValue) left.calculate_value();
+                if (!right.hasValue) right.calculate_value();
+                
+                if (sign == 0) value = FrAdd(left.value, right.value);
+                else value = FrMul(left.value, right.value);
+                hasValue = true;
+            }
+        }
+
+        class MultilinearKZG
+        {
+            private MCL.G1[][] srsLevels;
+            public MultilinearKZG(int n)
+            {
+                srsLevels = new MCL.G1[n][];
+                MCL.Fr tau = new MCL.Fr(); tau.SetByCSPRNG();
+                for (int i = 0; i < n; i++)
+                {
+                    int size = 1 << (n - i);
+                    srsLevels[i] = new MCL.G1[size];
+                    for (int j = 0; j < size; j++)
+                    {
+                        MCL.G1 baseG1 = new MCL.G1(); baseG1.SetHashOf("base");
+                        MCL.G1 res = new MCL.G1();
+                        res.Mul(baseG1, tau); 
+                        srsLevels[i][j] = res;
+                    }
+                }
+            }
+            public MCL.G1 Commit(MCL.Fr[] coeffs)
+            {
+                MCL.G1 res = new MCL.G1(); res.Clear();
+                for (int i = 0; i < coeffs.Length; i++)
+                {
+                    MCL.G1 tmp = new MCL.G1();
+                    tmp.Mul(srsLevels[0][i], coeffs[i]);
+                    res.Add(res, tmp);
+                }
+                return res;
             }
         }
 
         class Prover
         {
-            private Func<int[], int[], int[], int>[] funs;
-            private Func<int[], int>[] Vs;
-            private Func<int[], int>[] maskedPolys;
+            private Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr>[] funs;
+            private Func<MCL.Fr[], MCL.Fr>[] Vs;
+            private Func<MCL.Fr[], MCL.Fr>[] maskedPolys;
             private int layer;
             private int[] gateNum;
             private int[] bitsLen;
-            private int mod;
             private Node[][] circuit;
-            private Random rand;
 
-            public Prover(int layer, int[] gateNum, int[] bitsLen, int mod, Node[][] circuit)
+            public Prover(int layer, int[] gateNum, int[] bitsLen, Node[][] circuit)
             {
-                this.layer = layer; this.gateNum = gateNum; this.bitsLen = bitsLen; this.mod = mod; this.circuit = circuit;
-                rand = new Random();
-                Vs = new Func<int[], int>[layer];
-                funs = new Func<int[], int[], int[], int>[layer - 1];
-                maskedPolys = new Func<int[], int>[layer - 1];
+                this.layer = layer; this.gateNum = gateNum; this.bitsLen = bitsLen; this.circuit = circuit;
+                Vs = new Func<MCL.Fr[], MCL.Fr>[layer];
+                funs = new Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr>[layer - 1];
+                maskedPolys = new Func<MCL.Fr[], MCL.Fr>[layer - 1];
+                
                 for (int i = 0; i <= layer - 1; i++) Vs[i] = make_V(i);
                 for (int i = 0; i < layer - 1; i++) funs[i] = make_f(i);
                 for (int i = 0; i < layer - 1; i++) maskedPolys[i] = make_H(bitsLen[i] + bitsLen[i + 1] + bitsLen[i + 1]);
             }
-            public int W(int now_lawer, int index) => (int)circuit[now_lawer][index].value;
 
-            public Func<int[], int> make_V(int layer)
+            public MCL.Fr W(int now_layer, int index) => circuit[now_layer][index].value;
+
+            public Func<MCL.Fr[], MCL.Fr> make_V(int layer)
             {
-                return (int[] z) =>
+                return (MCL.Fr[] z) =>
                 {
-                    long s = 0;
+                    MCL.Fr s = ToFr(0);
                     for (int i = 0; i < gateNum[layer]; i++)
                     {
-                        long term = W(layer, i);
+                        MCL.Fr term = W(layer, i);
                         int[] indexBits = IntToBinary(i, bitsLen[layer]);
                         for (int j = 0; j < z.Length; j++)
                         {
-                            long val = (indexBits[j] == 1) ? z[j] : (1 - z[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (indexBits[j] == 1) ? z[j] : FrSub(ToFr(1), z[j]);
+                            term = FrMul(term, val);
                         }
-                        s = Mod(s + term, mod);
+                        s = FrAdd(s, term);
                     }
-                    return (int)s;
+                    return s;
                 };
             }
 
-            public Func<int[], int[], int[], int> make_f(int layer)
+            public Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr> make_f(int layer)
             {
-                return (int[] a, int[] b, int[] c) =>
+                return (MCL.Fr[] a, MCL.Fr[] b, MCL.Fr[] c) =>
                 {
-                    long s = 0;
+                    MCL.Fr s = ToFr(0);
                     var nextLayerV = Vs[layer + 1];
 
-                    long addPart = AddPoly(layer, circuit, mod)(a, b, c);
-                    long vSum = Mod((long)nextLayerV(b) + nextLayerV(c), mod);
-                    s = Mod(s + (addPart * vSum), mod);
+                    MCL.Fr addPart = AddPoly(layer, circuit)(a, b, c);
+                    MCL.Fr vSum = FrAdd(nextLayerV(b), nextLayerV(c));
+                    s = FrAdd(s, FrMul(addPart, vSum));
 
-                    long mulPart = MulPoly(layer, circuit, mod)(a, b, c);
-                    long vProd = Mod((long)nextLayerV(b) * nextLayerV(c), mod);
-                    s = Mod(s + (mulPart * vProd), mod);
+                    MCL.Fr mulPart = MulPoly(layer, circuit)(a, b, c);
+                    MCL.Fr vProd = FrMul(nextLayerV(b), nextLayerV(c));
+                    s = FrAdd(s, FrMul(mulPart, vProd));
 
-                    return (int)s;
+                    return s;
                 };
             }
-            public Func<int, int> make_G(int[] fixed_var, int nowLayer, int rho)
+
+            public Func<MCL.Fr, MCL.Fr> make_G(MCL.Fr[] fixed_var, int nowLayer, MCL.Fr rho)
             {
-                return (int z) =>
+                return (MCL.Fr z) =>
                 {
-                    long s = 0; long val1 = 0; long val2 = 0;
+                    MCL.Fr s = ToFr(0);
+                    MCL.Fr val1 = ToFr(0);
+                    MCL.Fr val2 = ToFr(0);
                     var g = funs[nowLayer];
-                    int[] parameter = new int[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
+                    
+                    MCL.Fr[] parameter = new MCL.Fr[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
                     parameter[fixed_var.Length] = z;
-                    for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length - 1); i++)
+                    
+                    int remainingBits = parameter.Length - fixed_var.Length - 1;
+                    int maxIter = 1 << remainingBits;
+
+                    for (int i = 0; i < maxIter; i++)
                     {
-                        int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length - 1);
-                        for (int j = 0; j < restBits.Length; j++) parameter[fixed_var.Length + 1 + j] = restBits[j];
-                        val1 += g(parameter.Take(bitsLen[nowLayer]).ToArray(), parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(), parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray());
-                        val1 = Mod(val1, mod);
-                        val2 += maskedPolys[nowLayer](parameter);
-                        val2 = Mod(val2, mod);
+                        int[] restBits = IntToBinary(i, remainingBits);
+                        for (int j = 0; j < restBits.Length; j++) 
+                            parameter[fixed_var.Length + 1 + j] = ToFr(restBits[j]);
+
+                        // ⭐️ 修正 3：直接截取 Fr 陣列傳遞
+                        MCL.Fr[] paramA = parameter.Take(bitsLen[nowLayer]).ToArray();
+                        MCL.Fr[] paramB = parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray();
+                        MCL.Fr[] paramC = parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray();
+
+                        val1 = FrAdd(val1, g(paramA, paramB, paramC));
+                        val2 = FrAdd(val2, maskedPolys[nowLayer](parameter));
                     }
-                    s = Mod(val1 + Mod(rho * val2, mod), mod);
-                    return (int)s;
+                    s = FrAdd(val1, FrMul(rho, val2));
+                    return s;
                 };
             }
-            public Func<int, int[]> make_l(int layer, int[] fixed_var)
+
+            public Func<MCL.Fr, MCL.Fr[]> make_l(int layer, MCL.Fr[] fixed_var)
             {
-                return (int z) =>
+                return (MCL.Fr z) =>
                 {
-                    int[] b = fixed_var.Skip(bitsLen[layer]).Take(bitsLen[layer + 1]).ToArray();
-                    int[] c = fixed_var.Skip(bitsLen[layer] + bitsLen[layer + 1]).Take(bitsLen[layer + 1]).ToArray();
-                    int[] l = new int[bitsLen[layer + 1]];
-                    for (int i = 0; i < l.Length; i++) l[i] = Mod((long)b[i] * (1 - z) + (long)c[i] * z, mod);
+                    MCL.Fr[] b = fixed_var.Skip(bitsLen[layer]).Take(bitsLen[layer + 1]).ToArray();
+                    MCL.Fr[] c = fixed_var.Skip(bitsLen[layer] + bitsLen[layer + 1]).Take(bitsLen[layer + 1]).ToArray();
+                    MCL.Fr[] l = new MCL.Fr[bitsLen[layer + 1]];
+                    for (int i = 0; i < l.Length; i++)
+                    {
+                        MCL.Fr t1 = FrMul(b[i], FrSub(ToFr(1), z));
+                        MCL.Fr t2 = FrMul(c[i], z);
+                        l[i] = FrAdd(t1, t2);
+                    }
                     return l;
                 };
             }
-            public Func<int, int> make_q(int layer, int[] fixed_var)
+
+            public Func<MCL.Fr, MCL.Fr> make_q(int layer, MCL.Fr[] fixed_var)
             {
-                return (int z) => Vs[layer + 1](make_l(layer, fixed_var)(z));
+                return (MCL.Fr z) => Vs[layer + 1](make_l(layer, fixed_var)(z));
             }
-            public Func<int[], int> claimed_D() => (int[] z) => Vs[0](z);
-            public int maskSum(int layer, int[] fixed_var)
+
+            public Func<MCL.Fr[], MCL.Fr> claimed_D() => (MCL.Fr[] z) => Vs[0](z);
+
+            public MCL.Fr maskSum(int layer, MCL.Fr[] fixed_var)
             {
-                long s = 0;
-                int[] parameter = new int[bitsLen[layer] + bitsLen[layer + 1] + bitsLen[layer + 1]];
+                MCL.Fr s = ToFr(0);
+                MCL.Fr[] parameter = new MCL.Fr[bitsLen[layer] + bitsLen[layer + 1] + bitsLen[layer + 1]];
                 for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
                 if (parameter.Length == fixed_var.Length) return maskedPolys[layer](parameter);
-                for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length); i++)
+                
+                int remainingBits = parameter.Length - fixed_var.Length;
+                int maxIter = 1 << remainingBits;
+
+                for (int i = 0; i < maxIter; i++)
                 {
-                    int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length);
-                    for (int j = 0; j < restBits.Length; j++) parameter[fixed_var.Length + j] = restBits[j];
-                    s = Mod(s + maskedPolys[layer](parameter), mod);
+                    int[] restBits = IntToBinary(i, remainingBits);
+                    for (int j = 0; j < restBits.Length; j++) 
+                        parameter[fixed_var.Length + j] = ToFr(restBits[j]);
+                    
+                    s = FrAdd(s, maskedPolys[layer](parameter));
                 }
-                return (int)s;
+                return s;
             }
-            public int pickRandom() => rand.Next(mod);
-            public Func<int[], int> make_H(int numVars)
+
+            public Func<MCL.Fr[], MCL.Fr> make_H(int numVars)
             {
-                long constantTerm = pickRandom();
-                long[] coeffA = new long[numVars]; long[] coeffB = new long[numVars];
-                for (int i = 0; i < numVars; i++) { coeffA[i] = pickRandom(); coeffB[i] = pickRandom(); }
-                return (int[] parameter) =>
+                MCL.Fr constantTerm = new MCL.Fr(); constantTerm.SetByCSPRNG();
+                MCL.Fr[] coeffA = new MCL.Fr[numVars];
+                MCL.Fr[] coeffB = new MCL.Fr[numVars];
+                for (int i = 0; i < numVars; i++)
                 {
-                    long s = constantTerm;
+                    coeffA[i] = new MCL.Fr(); coeffA[i].SetByCSPRNG();
+                    coeffB[i] = new MCL.Fr(); coeffB[i].SetByCSPRNG();
+                }
+                return (MCL.Fr[] parameter) =>
+                {
+                    MCL.Fr s = constantTerm;
                     for (int i = 0; i < parameter.Length; i++)
                     {
-                        long val = Mod((long)parameter[i] * parameter[i], mod);
-                        val = Mod(val * coeffB[i], mod);
-                        s = Mod(s + val, mod);
-                        val = Mod((long)parameter[i] * coeffA[i], mod);
-                        s = Mod(s + val, mod);
+                        MCL.Fr val = FrMul(parameter[i], parameter[i]);
+                        val = FrMul(val, coeffB[i]);
+                        s = FrAdd(s, val);
+                        
+                        val = FrMul(parameter[i], coeffA[i]);
+                        s = FrAdd(s, val);
                     }
-                    return (int)s;
+                    return s;
                 };
             }
         }
 
         class Verifier
         {
-            private Random rand;
-            private int mod;
-            public Verifier(int mod) { this.mod = mod; rand = new Random(); }
-            public int pickRandom() => rand.Next(mod);
-            public Func<int[], int> make_input(Node[] input, int bitslen)
+            public MCL.Fr pickRandom() { var f = new MCL.Fr(); f.SetByCSPRNG(); return f; }
+
+            public Func<MCL.Fr[], MCL.Fr> make_input(Node[] input, int bitslen)
             {
-                return (int[] z) =>
+                return (MCL.Fr[] z) =>
                 {
-                    long s = 0;
+                    MCL.Fr s = ToFr(0);
                     for (int i = 0; i < input.Length; i++)
                     {
-                        long term = (int)input[i].value;
+                        MCL.Fr term = input[i].value;
                         int[] indexBits = IntToBinary(i, bitslen);
                         for (int j = 0; j < z.Length; j++)
                         {
-                            long val = (indexBits[j] == 1) ? z[j] : (1 - z[j]);
-                            term = Mod(term * val, mod);
+                            MCL.Fr val = (indexBits[j] == 1) ? z[j] : FrSub(ToFr(1), z[j]);
+                            term = FrMul(term, val);
                         }
-                        s = Mod(s + term, mod);
+                        s = FrAdd(s, term);
                     }
-                    return (int)s;
+                    return s;
                 };
             }
         }
+        #endregion
     }
 }

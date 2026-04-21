@@ -4,25 +4,29 @@ namespace GKR_Backend
 {
     public class GkrRequest
     {
-        public int[][] Circuit { get; set; }
-        public int[] Inputs { get; set; }
+        public int[][]? Circuit { get; set; }
+        public int[]? Inputs { get; set; }
+        
+        // 接收前端的隱藏值
+        public int[]? HiddenValues { get; set; } 
+        
         public int Mod { get; set; } = 97;
     }
 
-    // ⭐️ 這是我們新增加的結構化事件模型
     public class GkrEvent
     {
-        public int ProtocolLayer { get; set; } // 0, 1, 2...
-        public int Round { get; set; }         // 1, 2, 3...
-        public string Role { get; set; }       // "Prover", "Verifier", 或 "System"
-        public string? Type { get; set; }      // 結構化事件代碼，例如 SEND_RHO
-        public string Message { get; set; }    // 具體的對話內容
-        public Dictionary<string, int>? Data { get; set; } // 事件附帶資料，例如 rho/s0/claimed
+        public int ProtocolLayer { get; set; }
+        public int Round { get; set; }
+        public string? Role { get; set; }
+        public string? Type { get; set; }
+        public string? Message { get; set; }
+        
+        // ⭐️ 將這裡改成 object?，前端才能接收彈性的 JSON (如 Commitment 資料)
+        public object? Data { get; set; } 
     }
 
     public class GkrResponse
     {
-        // ⭐️ 把原本的 List<string> 改成 List<GkrEvent>
-        public List<GkrEvent> Log { get; set; }
+        public List<GkrEvent>? Log { get; set; }
     }
 }
