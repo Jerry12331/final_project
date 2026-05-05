@@ -1,7 +1,34 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C /c/Users/User/Desktop/專題final/final_project log --oneline -15)"
+      "Bash(git -C /c/Users/User/Desktop/專題final/final_project log --oneline -15)",
+      "Bash(cmake --version)",
+      "Bash(g++ --version)",
+      "Bash(mingw32-make --version)",
+      "Bash(where cmake *)",
+      "Bash(where g++)",
+      "Bash(where make *)",
+      "Read(//c/Program Files/Microsoft Visual Studio//**)",
+      "Read(//c/Program Files/CMake/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/User/AppData/Local/Programs//**)",
+      "Read(//c//**)",
+      "Read(//c/MinGW//**)",
+      "Read(//c/Users/User/scoop/**)",
+      "Read(//d//**)",
+      "Read(//e//**)",
+      "Bash(node -e \"require\\('pptxgenjs'\\); console.log\\('ok'\\)\")",
+      "Bash(npm install *)",
+      "Bash(npm root *)",
+      "Bash(npm list *)",
+      "Bash(node make_pptx.js)",
+      "Bash(python \"C:/Users/User/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6c35dab0-1907-458f-a853-6a33b06b2501/21135b10-f743-4e21-8e43-1f1e5588a39b/skills/pptx/scripts/office/soffice.py\" --headless --convert-to pdf GKR_Presentation.pptx)",
+      "Bash(where soffice *)",
+      "Bash(where libreoffice *)",
+      "Bash(dir \"C:\\\\Program Files\\\\LibreOffice\\\\program\\\\soffice.exe\")",
+      "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\LibreOffice\\\\program\\\\soffice.exe\")",
+      "Bash(python \"C:/Users/User/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6c35dab0-1907-458f-a853-6a33b06b2501/21135b10-f743-4e21-8e43-1f1e5588a39b/skills/pptx/scripts/extract-text.py\" GKR_Presentation.pptx)",
+      "Bash(python -c ' *)"
     ]
   }
 }
