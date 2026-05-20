@@ -18,6 +18,8 @@
         </div>
       </div>
     </div>
+    <VariablesPanel :vars="accumulatedVars" />
+
     <div class="protocol-container">
       <div 
         v-for="layer in protocolState.layers" 
@@ -84,6 +86,7 @@ import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import CircuitCanvas from "../components/CircuitCanvas.vue";
 import ExplanationBox from "../components/ExplanationBox.vue";
+import VariablesPanel from "../components/VariablesPanel.vue";
 
 const route = useRoute();
 const currentStep = ref(0);
@@ -147,15 +150,16 @@ function buildDisplayCircuit(circuitData, inputData) {
   if (looksLikeStructuredLayers) return circuitData;
 
   const normalizedInputs = Array.isArray(inputData) ? [...inputData] : [];
-  while (normalizedInputs.length < 3) {
+  while (normalizedInputs.length < 4) {
     normalizedInputs.push(0);
   }
 
   const in0 = normalizedInputs[0];
   const in1 = normalizedInputs[1];
   const in2 = normalizedInputs[2];
+  const in3 = normalizedInputs[3];
   const g1Value = in0 * in1;
-  const g2Value = in1 + in2;
+  const g2Value = in2 + in3;
 
   const inputLayer = normalizedInputs.map((value, index) => ({
     id: `in${index}`,
@@ -169,7 +173,7 @@ function buildDisplayCircuit(circuitData, inputData) {
     ],
     [
       { id: "g1", type: "mul", inputs: ["in0", "in1"], value: g1Value },
-      { id: "g2", type: "add", inputs: ["in1", "in2"], value: g2Value }
+      { id: "g2", type: "add", inputs: ["in2", "in3"], value: g2Value }
     ],
     inputLayer
   ];
@@ -215,7 +219,7 @@ function parseEvents(events) {
     else if (pRole === "Verifier") roundObj.verifier += pMessage + "\n";
     else roundObj.verifier += `${pMessage}\n`;
 
-    if (pType && ["SEND_RHO", "SEND_S", "CLAIM_VALUE"].includes(pType)) {
+    if (pType) {
       roundObj.type = pType;
       roundObj.data = { ...roundObj.data, ...(pData || {}) };
     }
@@ -304,6 +308,38 @@ const flattenedRounds = computed(() => {
 
 const currentLayer = computed(() => {
   return flattenedRounds.value[currentStep.value]?.layer ?? 0;
+});
+
+// ── 累積變數狀態：逐步合併到當前 step ─────────────────
+const accumulatedVars = computed(() => {
+  const state = {
+    layer:        null,
+    inputValues:  inputVector.value.length ? inputVector.value.join(', ') : null,
+    circuit:      null,
+    fixedVar:     null,
+    claimed:      null,
+    G:            null,
+    s:            null,
+    rho:          null,
+    maskSum:      null,
+    gCommitment:  null,
+  };
+
+  const rounds = flattenedRounds.value.slice(0, currentStep.value + 1);
+  for (const r of rounds) {
+    state.layer = r.layer;
+    const d = r.data || {};
+    if (r.type === 'SEND_FIXED_VAR' && d.fixedVar)     state.fixedVar    = d.fixedVar;
+    if (r.type === 'CLAIM_D'        && d.claimed)       state.claimed     = d.claimed;
+    if (r.type === 'SEND_RHO'       && d.rho)           state.rho         = d.rho;
+    if (r.type === 'SEND_S'         && d.s)             state.s           = `s${d.sIndex} = ${d.s}`;
+    if (r.type === 'SEND_MASKSUM'   && d.maskSum)       state.maskSum     = d.maskSum;
+    if (r.type === 'SEND_MASKSUM_FINAL' && d.maskSum)   state.maskSum     = d.maskSum;
+    if (r.type === 'CLAIM_G'        && d.claimed)       state.claimed     = d.claimed;
+    if (r.type === 'CLAIM_VALUE'    && d.commitment)    state.gCommitment = d.commitment;
+  }
+
+  return state;
 });
 
 const currentActiveGates = computed(() => {

@@ -33,9 +33,9 @@ namespace GKR_Backend.Services
             _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Prover", Type = type, Message = msg, Data = data });
         }
 
-        private void AddVerifierEvent(string msg, bool incrementRound = false)
+        private void AddVerifierEvent(string msg, bool incrementRound = false, string type = "VERIFIER_MESSAGE", object? data = null)
         {
-            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Message = msg });
+            _events.Add(new GkrEvent { ProtocolLayer = _currentLayer, Round = _currentRound, Role = "Verifier", Type = type, Message = msg, Data = data });
             if (incrementRound) _currentRound++;
         }
 
@@ -152,10 +152,15 @@ namespace GKR_Backend.Services
             AddProverEvent($"send D() and the circuit outputs: {outputVals}");
 
             for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-            AddVerifierEvent($"send fixed_var = " + string.Join(", ", fixed_var.Select(f => f.GetStr(10))));
+            AddVerifierEvent(
+                $"send fixed_var = " + string.Join(", ", fixed_var.Select(f => f.GetStr(10))),
+                type: "SEND_FIXED_VAR",
+                data: new { fixedVar = fixed_var.Select(f => f.GetStr(10)).ToArray() }
+            );
 
             MCL.Fr claimed = claimed_D(fixed_var);
-            AddProverEvent($"claimed D(fixed_var) = {claimed.GetStr(10)}");
+            AddProverEvent($"claimed D(fixed_var) = {claimed.GetStr(10)}", "CLAIM_D",
+                new { claimed = claimed.GetStr(10) });
             _currentRound++;
 
             for (int now_layer = 0; now_layer < totalLayers - 1; now_layer++)
@@ -164,10 +169,12 @@ namespace GKR_Backend.Services
                 _currentRound = 1;
 
                 MCL.Fr maskSum = prover.maskSum(now_layer, fixed_var);
-                AddProverEvent($"send maskSum = {maskSum.GetStr(10)}");
-                
+                AddProverEvent($"send maskSum = {maskSum.GetStr(10)}", "SEND_MASKSUM",
+                    new { maskSum = maskSum.GetStr(10) });
+
                 MCL.Fr rho = verifier.pickRandom();
-                AddVerifierEvent($"send rho = {rho.GetStr(10)}", true);
+                AddVerifierEvent($"send rho = {rho.GetStr(10)}", true, "SEND_RHO",
+                    new { rho = rho.GetStr(10) });
 
                 claimed = FrAdd(claimed, FrMul(rho, maskSum));
 
@@ -179,18 +186,21 @@ namespace GKR_Backend.Services
                     if (!claimed.Equals(term)) { AddVerifierEvent("V: Sumcheck Failed!"); return; }
 
                     MCL.Fr s = verifier.pickRandom();
-                    AddVerifierEvent($"send s{i} = {s.GetStr(10)}");
-                    
+                    AddVerifierEvent($"send s{i} = {s.GetStr(10)}", type: "SEND_S",
+                        data: new { sIndex = i, s = s.GetStr(10) });
+
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
-                    AddProverEvent($"claimed G{i}(s{i}) = {claimed.GetStr(10)}");
+                    AddProverEvent($"claimed G{i}(s{i}) = {claimed.GetStr(10)}", "CLAIM_G",
+                        new { gIndex = i, claimed = claimed.GetStr(10) });
                     _currentRound++;
 
                     if (now_layer == totalLayers - 2 && i == bitsLen[now_layer + 1] * 2 - 1)
                     {
                         var input_poly = verifier.make_input(circuit[totalLayers - 1], bitsLen[totalLayers - 1]);
                         maskSum = prover.maskSum(now_layer, fixed_var);
-                        AddProverEvent($"send maskSum with fixed_var = {maskSum.GetStr(10)}");
+                        AddProverEvent($"send maskSum with fixed_var = {maskSum.GetStr(10)}", "SEND_MASKSUM_FINAL",
+                            new { maskSum = maskSum.GetStr(10) });
                         
                         claimed = FrSub(claimed, FrMul(rho, maskSum));
 
@@ -211,7 +221,7 @@ namespace GKR_Backend.Services
 
                         if (!claimed.Equals(term)) { AddVerifierEvent("V: final check failed"); return; }
                         
-                        AddVerifierEvent("sum check passed, Verifier can trust D()");
+                        AddVerifierEvent("sum check passed, Verifier can trust D()", type: "SUMCHECK_PASS");
                         AddSystemEvent("GKR 驗證成功，執行 KZG 開放驗證...");
                         break;
                     }
@@ -241,7 +251,8 @@ namespace GKR_Backend.Services
                         if (!claimed.Equals(term)) { AddVerifierEvent("V: intermediate check failed"); return; }
 
                         MCL.Fr random_var = verifier.pickRandom();
-                        AddVerifierEvent($"sum check passed. send r{now_layer + 1} = {random_var.GetStr(10)}", true);
+                        AddVerifierEvent($"sum check passed. send r{now_layer + 1} = {random_var.GetStr(10)}", true,
+                            "SUMCHECK_PASS", new { randomVar = random_var.GetStr(10), layer = now_layer + 1 });
                         
                         claimed = claimed_poly(random_var);
 

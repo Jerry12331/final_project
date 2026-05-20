@@ -28,7 +28,10 @@
       "Bash(dir \"C:\\\\Program Files\\\\LibreOffice\\\\program\\\\soffice.exe\")",
       "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\LibreOffice\\\\program\\\\soffice.exe\")",
       "Bash(python \"C:/Users/User/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6c35dab0-1907-458f-a853-6a33b06b2501/21135b10-f743-4e21-8e43-1f1e5588a39b/skills/pptx/scripts/extract-text.py\" GKR_Presentation.pptx)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)",
+      "Read(//c/Users/User/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6c35dab0-1907-458f-a853-6a33b06b2501/21135b10-f743-4e21-8e43-1f1e5588a39b/skills/pptx/**)",
+      "Bash(python scripts/extract-text.py \"C:\\\\Users\\\\User\\\\Desktop\\\\自然語言模型proposal\\\\proposal.pptx\")"
     ]
   }
 }
