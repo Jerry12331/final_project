@@ -11,6 +11,9 @@ namespace GKR_Backend
         // 若為 null 則退回二元樹預設（2j, 2j+1）
         public int[][][]? Connections { get; set; }
 
+        // Hidden witness values
+        public int[]? HiddenValues { get; set; }
+
         public int Mod { get; set; } = 97;
     }
 
