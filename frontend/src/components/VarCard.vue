@@ -73,7 +73,7 @@ const displayValue = computed(() => {
 }
 
 .var-name {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: #374151;
   font-family: monospace;
@@ -86,13 +86,13 @@ const displayValue = computed(() => {
 
 .val-text {
   font-family: monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: #1e3a5f;
   word-break: break-all;
 }
 
 .var-empty {
-  font-size: 11px;
+  font-size: 12px;
   color: #9ca3af;
   font-style: italic;
 }

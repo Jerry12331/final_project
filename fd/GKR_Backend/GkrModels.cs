@@ -6,10 +6,11 @@ namespace GKR_Backend
     {
         public int[][]? Circuit { get; set; }
         public int[]? Inputs { get; set; }
-        
-        // 接收前端的隱藏值
-        public int[]? HiddenValues { get; set; } 
-        
+
+        // 明確連線：[layer][gate][0=left, 1=right]
+        // 若為 null 則退回二元樹預設（2j, 2j+1）
+        public int[][][]? Connections { get; set; }
+
         public int Mod { get; set; } = 97;
     }
 

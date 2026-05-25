@@ -12,7 +12,6 @@
         <div class="var-grid">
           <VarCard name="layer" :value="vars.layer" desc="目前驗證所在的電路層（0 = 輸出層）" />
           <VarCard name="inputValues" :value="vars.inputValues" desc="電路最底層的公開輸入值" />
-          <VarCard name="circuit" :value="vars.circuit" desc="電路結構（每層閘的運算類型）" />
         </div>
       </div>
 
@@ -22,7 +21,6 @@
         <div class="var-grid">
           <VarCard name="fixed_var" :value="vars.fixedVar" desc="Verifier 選定的隨機求值座標，Prover 必須在此點正確回答" />
           <VarCard name="claimed" :value="vars.claimed" desc="Prover 目前宣稱的多項式求值結果" />
-          <VarCard name="G(z)" :value="vars.G" desc="Prover 送出的單變數多項式，Verifier 逐步驗證其求和" />
           <VarCard name="s（Sumcheck 隨機數）" :value="vars.s" desc="Verifier 在每輪 Sumcheck 隨機選取的挑戰點" />
         </div>
       </div>
@@ -33,7 +31,6 @@
         <div class="var-grid">
           <VarCard name="rho" :value="vars.rho" desc="用於混合遮掩多項式 g 的隨機係數，防止零知識洩漏" />
           <VarCard name="maskSum" :value="vars.maskSum" desc="遮掩多項式 g 在所有輸入的總和，用來抵消 rho 的影響" />
-          <VarCard name="gCommitment" :value="vars.gCommitment" desc="輸入層多項式的 KZG 承諾，讓 Verifier 可驗證輸入正確" />
         </div>
       </div>
     </div>
@@ -78,12 +75,12 @@ const open = ref(true)
 
 .vars-title {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
   color: #1e3a5f;
 }
 
 .vars-toggle {
-  font-size: 12px;
+  font-size: 14px;
   color: #6b7280;
 }
 
@@ -97,11 +94,11 @@ const open = ref(true)
 .var-group { display: flex; flex-direction: column; gap: 8px; }
 
 .group-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 4px;
   width: fit-content;
 }

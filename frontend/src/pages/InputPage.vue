@@ -4,40 +4,39 @@
 
     <div class="block">
       <h3>電路矩陣（0 = 加法, 1 = 乘法）</h3>
-      <p class="hint">範例：[[0],[1,0]] (需符合二元樹結構)</p>
-      <textarea
-        v-model="circuitText"
-        rows="4"
-        placeholder="請輸入電路矩陣（JSON 格式）"
-      ></textarea>
+      <p class="hint">範例：[[0],[1,0]]　或任意閘數：[[0,1,1,0],[0,1]]</p>
+      <textarea v-model="circuitText" rows="4" placeholder="請輸入電路矩陣（JSON 格式）"></textarea>
     </div>
 
     <div class="block">
       <h3>公開 Input 向量</h3>
       <p class="hint">範例：[3,5,2,7]</p>
-      <textarea
-        v-model="inputText"
-        rows="2"
-        placeholder="請輸入公開 input（JSON 格式）"
-      ></textarea>
+      <textarea v-model="inputText" rows="2" placeholder="請輸入公開 input（JSON 格式）"></textarea>
     </div>
 
-    <div class="block hidden-section">
-      <h3 class="text-purple-600">隱藏值 (Hidden Values / Witness)</h3>
-      <p class="hint">用於 Commitment 的私密數值或隨機因子。範例：[1,0,0,1]</p>
-      <textarea
-        v-model="hiddenText"
-        rows="2"
-        placeholder="請輸入隱藏值（JSON 格式）"
-        class="border-purple-200"
-      ></textarea>
+    <!-- 連線設定（可選） -->
+    <div class="block">
+      <button class="toggle-conn-btn" @click="showConn = !showConn">
+        {{ showConn ? '▲ 收起自訂連線' : '▼ 自訂閘連線（選填）' }}
+      </button>
+      <div v-if="showConn" class="conn-section">
+        <p class="hint">
+          每層用 <code>@</code> 分隔各閘，每個閘填 <code>[左子index, 右子index]</code>。<br>
+          不填則自動使用二元樹預設（第 j 個閘接 2j 和 2j+1）。<br>
+          範例（對應上方 [[0,1,1,0],[0,1]]）：<br>
+          <code>[[[0,0],[0,1],[1,1],[0,1]],[[0,1],[2,3]]]</code>
+        </p>
+        <textarea
+          v-model="connText"
+          rows="4"
+          placeholder='留空 = 二元樹預設&#10;範例：[[[0,0],[0,1],[1,1],[0,1]],[[0,1],[2,3]]]'
+        ></textarea>
+      </div>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <button class="btn" @click="submit">
-      開始 GKR 驗證
-    </button>
+    <button class="btn" @click="submit">開始 GKR 驗證</button>
   </div>
 </template>
 
@@ -48,30 +47,32 @@ import { useRouter } from "vue-router";
 const router = useRouter();
 
 const circuitText = ref("[[0],[1,0]]");
-const inputText = ref("[3,5,2,7]");
-// ⭐️ 初始化隱藏值
-const hiddenText = ref("[0,0,0,0]"); 
-const error = ref("");
+const inputText   = ref("[3,5,2,7]");
+const connText    = ref("");
+const showConn    = ref(false);
+const error       = ref("");
 
 function submit() {
   error.value = "";
-
   try {
     const circuit = JSON.parse(circuitText.value);
-    const input = JSON.parse(inputText.value);
-    const hidden = JSON.parse(hiddenText.value);
+    const input   = JSON.parse(inputText.value);
 
     if (!Array.isArray(circuit)) throw new Error("電路必須是二維陣列");
-    if (!Array.isArray(input)) throw new Error("input 必須是陣列");
-    if (!Array.isArray(hidden)) throw new Error("隱藏值必須是陣列");
+    if (!Array.isArray(input))   throw new Error("input 必須是陣列");
 
-    // ⭐ 重點：把資料（包含隱藏值）送到 ChatPage
+    let connections = null;
+    if (connText.value.trim()) {
+      connections = JSON.parse(connText.value.trim());
+      if (!Array.isArray(connections)) throw new Error("連線必須是三維陣列");
+    }
+
     router.push({
       path: "/chat",
       query: {
-        circuit: JSON.stringify(circuit),
-        input: JSON.stringify(input),
-        hidden: JSON.stringify(hidden) 
+        circuit:     JSON.stringify(circuit),
+        input:       JSON.stringify(input),
+        connections: connections ? JSON.stringify(connections) : ""
       }
     });
 
@@ -87,40 +88,26 @@ function submit() {
   margin: auto;
   padding: 24px;
   font-family: sans-serif;
+  font-size: 17px;
 }
 
 .title {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: bold;
   margin-bottom: 20px;
 }
 
-.block {
-  margin-bottom: 20px;
-}
-
-/* 隱藏值區塊樣式 */
-.hidden-section {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 2px dashed #e9d5ff;
-}
-.text-purple-600 {
-  color: #9333ea;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-.border-purple-200 {
-  border: 1px solid #e9d5ff;
-}
+.block { margin-bottom: 20px; }
 
 textarea {
   width: 100%;
   font-family: monospace;
-  padding: 10px;
+  font-size: 16px;
+  padding: 12px;
   border: 1px solid #d1d5db;
   border-radius: 4px;
   margin-top: 4px;
+  box-sizing: border-box;
 }
 
 textarea:focus {
@@ -129,10 +116,33 @@ textarea:focus {
 }
 
 .hint {
-  font-size: 13px;
+  font-size: 15px;
   color: #6b7280;
   margin-bottom: 4px;
+  line-height: 1.6;
 }
+
+.hint code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 14px;
+}
+
+.toggle-conn-btn {
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 15px;
+  cursor: pointer;
+  color: #374151;
+  margin-bottom: 10px;
+}
+
+.toggle-conn-btn:hover { background: #f1f5f9; }
+
+.conn-section { margin-top: 4px; }
 
 .error {
   color: #dc2626;
@@ -150,10 +160,9 @@ textarea:focus {
   border: none;
   cursor: pointer;
   font-weight: 600;
+  font-size: 17px;
   transition: background 0.2s;
 }
 
-.btn:hover {
-  background: #1d4ed8;
-}
+.btn:hover { background: #1d4ed8; }
 </style>

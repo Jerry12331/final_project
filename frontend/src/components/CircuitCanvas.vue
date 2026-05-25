@@ -172,7 +172,7 @@ function recalculateWires() {
       if (!currentEl) return;
       const target = gateCenter(currentEl, circuitRect);
 
-      gate.inputs.forEach((inputId) => {
+      gate.inputs.forEach((inputId, inputIdx) => {
         const parent = gatePosition.get(inputId);
         if (!parent) return;
 
@@ -180,11 +180,16 @@ function recalculateWires() {
         if (!parentEl) return;
 
         const source = gateCenter(parentEl, circuitRect);
+
+        // 同一個閘被連兩次時，左右各偏移 5px 讓兩條線都看得見
+        const isDuplicate = gate.inputs[0] === gate.inputs[1];
+        const offset = isDuplicate ? (inputIdx === 0 ? -5 : 5) : 0;
+
         segments.push({
-          id: `${inputId}-${gate.id}`,
-          x1: source.x,
+          id: `${inputId}-${gate.id}-${inputIdx}`,
+          x1: source.x + offset,
           y1: source.y,
-          x2: target.x,
+          x2: target.x + offset,
           y2: target.y
         });
       });

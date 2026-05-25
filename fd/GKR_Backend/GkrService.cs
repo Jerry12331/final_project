@@ -110,7 +110,9 @@ namespace GKR_Backend.Services
             {
                 for (int j = 0; j < circuit[i].Length; j++)
                 {
-                    int leftIdx = j * 2, rightIdx = j * 2 + 1;
+                    // 有明確連線就用，否則退回二元樹預設（2j, 2j+1）
+                    int leftIdx  = req.Connections?[i]?[j]?[0] ?? j * 2;
+                    int rightIdx = req.Connections?[i]?[j]?[1] ?? j * 2 + 1;
                     if (leftIdx < circuit[i + 1].Length && rightIdx < circuit[i + 1].Length)
                     {
                         circuit[i][j].set_left(circuit[i + 1][leftIdx]);

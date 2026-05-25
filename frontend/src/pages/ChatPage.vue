@@ -4,20 +4,6 @@
 
     <ExplanationBox :explanation="currentExplanation" />
 
-    <div class="hidden-values-wrapper" v-if="hiddenValues && hiddenValues.length > 0">
-      <button @click="showHidden = !showHidden" class="toggle-hidden-btn">
-        {{ showHidden ? '點擊收起 Witness' : '點擊查看 Witness (隱藏值)' }}
-      </button>
-      
-      <div v-show="showHidden" class="hidden-values-content">
-        <span class="val-label">目前持有的隱藏值：</span>
-        <div class="pill-container">
-          <span v-for="(val, idx) in hiddenValues" :key="idx" class="val-pill">
-            {{ val }}
-          </span>
-        </div>
-      </div>
-    </div>
     <VariablesPanel :vars="accumulatedVars" />
 
     <div class="protocol-container">
@@ -69,8 +55,11 @@
       </div>
     </div>
 
-    <div v-if="totalSteps > 0 && currentStep === totalSteps - 1" class="verify-success">
+    <div v-if="totalSteps > 0 && currentStep === totalSteps - 1 && verificationSucceeded" class="verify-success">
       ✓ 驗證成功！GKR 協議已完成，電路計算正確無誤。
+    </div>
+    <div v-if="totalSteps > 0 && currentStep === totalSteps - 1 && verificationFailed" class="verify-fail">
+      ✗ 驗證失敗！Sumcheck 協議未通過，電路計算可能有誤。
     </div>
 
     <div class="controls">
@@ -95,9 +84,6 @@ const currentStep = ref(0);
 const circuit = ref(null);
 const inputVector = ref([]);
 
-// 新增：儲存隱藏值與控制顯示狀態的變數
-const hiddenValues = ref([]);
-const showHidden = ref(false);
 
 const protocolState = ref({
   currentLayer: 0,
@@ -106,25 +92,24 @@ const protocolState = ref({
 
 onMounted(async () => {
   try {
-    const circuitData = route.query.circuit ? JSON.parse(route.query.circuit) : [[0],[1,0]];
-    const inputData = route.query.input ? JSON.parse(route.query.input) : [3,5,2,7];
-    const hiddenData = route.query.hidden ? JSON.parse(route.query.hidden) : [];
+    const circuitData     = route.query.circuit     ? JSON.parse(route.query.circuit)     : [[0],[1,0]];
+    const inputData       = route.query.input       ? JSON.parse(route.query.input)       : [3,5,2,7];
+    const connectionsData = route.query.connections ? JSON.parse(route.query.connections) : null;
 
     inputVector.value = inputData;
-    circuit.value = buildDisplayCircuit(circuitData, inputData);
-    
-    // 把接到的隱藏值存進響應式變數中，供畫面上方渲染
-    hiddenValues.value = hiddenData;
+    circuit.value = buildDisplayCircuit(circuitData, inputData, connectionsData);
 
     // 呼叫 C# API
+    const body = {
+      circuit: Array.isArray(circuitData) && typeof circuitData[0]?.[0] === "number" ? circuitData : [[0],[1,0]],
+      inputs: inputData
+    };
+    if (connectionsData) body.connections = connectionsData;
+
     const response = await fetch("http://localhost:5285/api/run_gkr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        circuit: Array.isArray(circuitData) && typeof circuitData[0]?.[0] === "number" ? circuitData : [[0],[1,0]],
-        inputs: inputData,
-        hiddenValues: hiddenData // 目前後端會忽略，之後加 Commitment 時就用得到
-      })
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -140,7 +125,7 @@ onMounted(async () => {
   }
 });
 
-function buildDisplayCircuit(circuitData, inputData) {
+function buildDisplayCircuit(circuitData, inputData, connections = null) {
   const looksLikeStructuredLayers = Array.isArray(circuitData)
     && Array.isArray(circuitData[0])
     && typeof circuitData[0][0] === "object"
@@ -149,34 +134,48 @@ function buildDisplayCircuit(circuitData, inputData) {
 
   if (looksLikeStructuredLayers) return circuitData;
 
-  const normalizedInputs = Array.isArray(inputData) ? [...inputData] : [];
-  while (normalizedInputs.length < 4) {
-    normalizedInputs.push(0);
+  const numLayers = circuitData.length;
+  const allValues = new Array(numLayers + 1);
+  allValues[numLayers] = [...inputData];
+
+  // 由下往上計算每層的值（使用明確連線或二元樹預設）
+  for (let i = numLayers - 1; i >= 0; i--) {
+    const childVals = allValues[i + 1];
+    allValues[i] = circuitData[i].map((type, j) => {
+      const l = connections?.[i]?.[j]?.[0] ?? j * 2;
+      const r = connections?.[i]?.[j]?.[1] ?? j * 2 + 1;
+      const lv = childVals[l] ?? 0;
+      const rv = childVals[r] ?? 0;
+      return type === 0 ? lv + rv : lv * rv;
+    });
   }
 
-  const in0 = normalizedInputs[0];
-  const in1 = normalizedInputs[1];
-  const in2 = normalizedInputs[2];
-  const in3 = normalizedInputs[3];
-  const g1Value = in0 * in1;
-  const g2Value = in2 + in3;
+  // 建立有 id / inputs / value 的結構
+  const layers = [];
+  for (let i = 0; i < numLayers; i++) {
+    const isBottom = (i === numLayers - 1);
+    layers.push(circuitData[i].map((type, j) => {
+      const l = connections?.[i]?.[j]?.[0] ?? j * 2;
+      const r = connections?.[i]?.[j]?.[1] ?? j * 2 + 1;
+      const leftId  = isBottom ? `in${l}` : `l${i + 1}g${l}`;
+      const rightId = isBottom ? `in${r}` : `l${i + 1}g${r}`;
+      return {
+        id: (i === 0 && circuitData[i].length === 1) ? "out" : `l${i}g${j}`,
+        type: type === 0 ? "add" : "mul",
+        inputs: [leftId, rightId],
+        value: allValues[i][j]
+      };
+    }));
+  }
 
-  const inputLayer = normalizedInputs.map((value, index) => ({
+  // 輸入層
+  layers.push(inputData.map((value, index) => ({
     id: `in${index}`,
     type: "input",
     value
-  }));
+  })));
 
-  return [
-    [
-      { id: "out", type: "add", inputs: ["g1", "g2"], value: g1Value + g2Value }
-    ],
-    [
-      { id: "g1", type: "mul", inputs: ["in0", "in1"], value: g1Value },
-      { id: "g2", type: "add", inputs: ["in2", "in3"], value: g2Value }
-    ],
-    inputLayer
-  ];
+  return layers;
 }
 
 function parseEvents(events) {
@@ -248,7 +247,8 @@ function formatMessage(msg) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
-  return escaped.replace(/\b(\d{17,})\b/g, (match) => {
+  // 同時截斷：十進位長數字（17位以上）和十六進位長字串（32字元以上，如 KZG commitment）
+  return escaped.replace(/\b([0-9a-fA-F]{32,}|\d{17,})\b/g, (match) => {
     const truncated = match.slice(0, 8) + '...' + match.slice(-8);
     return `<span class="big-num" title="${match}">${truncated}</span>`;
   });
@@ -310,33 +310,38 @@ const currentLayer = computed(() => {
   return flattenedRounds.value[currentStep.value]?.layer ?? 0;
 });
 
+const verificationFailed = computed(() =>
+  flattenedRounds.value.some(r =>
+    r.verifier.toLowerCase().includes('failed') || r.prover.toLowerCase().includes('failed')
+  )
+);
+
+const verificationSucceeded = computed(() =>
+  !verificationFailed.value &&
+  flattenedRounds.value.some(r => r.type === 'SUMCHECK_PASS')
+);
+
 // ── 累積變數狀態：逐步合併到當前 step ─────────────────
 const accumulatedVars = computed(() => {
   const state = {
-    layer:        null,
-    inputValues:  inputVector.value.length ? inputVector.value.join(', ') : null,
-    circuit:      null,
-    fixedVar:     null,
-    claimed:      null,
-    G:            null,
-    s:            null,
-    rho:          null,
-    maskSum:      null,
-    gCommitment:  null,
+    layer:       null,
+    inputValues: inputVector.value.length ? inputVector.value.join(', ') : null,
+    fixedVar:    null,
+    claimed:     null,
+    s:           null,
+    rho:         null,
+    maskSum:     null,
   };
 
   const rounds = flattenedRounds.value.slice(0, currentStep.value + 1);
   for (const r of rounds) {
     state.layer = r.layer;
     const d = r.data || {};
-    if (r.type === 'SEND_FIXED_VAR' && d.fixedVar)     state.fixedVar    = d.fixedVar;
-    if (r.type === 'CLAIM_D'        && d.claimed)       state.claimed     = d.claimed;
-    if (r.type === 'SEND_RHO'       && d.rho)           state.rho         = d.rho;
-    if (r.type === 'SEND_S'         && d.s)             state.s           = `s${d.sIndex} = ${d.s}`;
-    if (r.type === 'SEND_MASKSUM'   && d.maskSum)       state.maskSum     = d.maskSum;
-    if (r.type === 'SEND_MASKSUM_FINAL' && d.maskSum)   state.maskSum     = d.maskSum;
-    if (r.type === 'CLAIM_G'        && d.claimed)       state.claimed     = d.claimed;
-    if (r.type === 'CLAIM_VALUE'    && d.commitment)    state.gCommitment = d.commitment;
+    if (d.fixedVar !== undefined) state.fixedVar = d.fixedVar;
+    if (d.claimed  !== undefined) state.claimed  = d.claimed;
+    if (d.rho      !== undefined) state.rho      = d.rho;
+    if (d.s        !== undefined) state.s        = `s${d.sIndex} = ${d.s}`;
+    if (d.maskSum  !== undefined) state.maskSum  = d.maskSum;
   }
 
   return state;
@@ -400,65 +405,10 @@ const currentExplanation = computed(() => {
 .chat-page {
   padding: 20px;
   font-family: sans-serif;
+  font-size: 17px;
   padding-right: 340px;
 }
 
-/* ===== 隱藏值 (Witness) 區塊樣式 ===== */
-.hidden-values-wrapper {
-  margin-top: 16px;
-  padding: 12px 16px;
-  background-color: #faf5ff; /* 淺紫底色 */
-  border: 1px dashed #d8b4fe;
-  border-radius: 8px;
-}
-
-.toggle-hidden-btn {
-  background: none;
-  border: none;
-  color: #9333ea;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-}
-
-.toggle-hidden-btn:hover {
-  text-decoration: underline;
-  color: #7e22ce;
-}
-
-.hidden-values-content {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.val-label {
-  font-size: 13px;
-  color: #6b21a8;
-  font-weight: 500;
-}
-
-.pill-container {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.val-pill {
-  background-color: #f3e8ff;
-  color: #6b21a8;
-  padding: 4px 12px;
-  border-radius: 9999px; /* 圓角藥丸形狀 */
-  font-family: monospace;
-  font-weight: bold;
-  border: 1px solid #e9d5ff;
-  font-size: 14px;
-}
-/* ======================================= */
 
 .protocol-container {
   margin-top: 20px;
@@ -482,7 +432,7 @@ const currentExplanation = computed(() => {
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   transition: background 0.2s;
 }
@@ -509,16 +459,16 @@ const currentExplanation = computed(() => {
 
 .chat-column {
   border: 1px solid #e5e7eb;
-  padding: 12px;
-  max-height: 400px;
+  padding: 16px;
+  max-height: 520px;
   overflow-y: auto;
   background: white;
   border-radius: 6px;
 }
 
-.chat-column h4 { margin-bottom: 12px; font-weight: bold; font-size: 1em; color: #374151; }
-.chat-bubble { padding: 12px; margin: 8px 0; border-radius: 8px; line-height: 1.5; }
-.round-label { display: block; font-size: 11px; font-weight: 600; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; }
+.chat-column h4 { margin-bottom: 14px; font-weight: bold; font-size: 1.15em; color: #374151; }
+.chat-bubble { padding: 16px 18px; margin: 10px 0; border-radius: 8px; line-height: 1.7; font-size: 17px; }
+.round-label { display: block; font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 6px; text-transform: uppercase; }
 .chat-bubble p { margin: 0; }
 .verifier-bubble { background-color: #eef2ff; border-left: 3px solid #3b82f6; }
 .prover-bubble { background-color: #fef2f2; border-left: 3px solid #ef4444; }
@@ -530,6 +480,18 @@ const currentExplanation = computed(() => {
   cursor: help;
   border-radius: 2px;
   padding: 0 2px;
+}
+
+.verify-fail {
+  margin-top: 20px;
+  padding: 14px 20px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+  color: #b91c1c;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .verify-success {
@@ -554,17 +516,17 @@ const currentExplanation = computed(() => {
 .controls button {
   background: #2563eb;
   color: white;
-  padding: 10px 20px;
+  padding: 12px 28px;
   border-radius: 6px;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
 }
 
 .controls button:hover { background: #1d4ed8; }
 .controls button:disabled { background: #93c5fd; cursor: not-allowed; }
-.step-info { color: #374151; font-size: 14px; font-weight: 500; }
+.step-info { color: #374151; font-size: 16px; font-weight: 500; }
 
 @media (max-width: 1100px) {
   .chat-page { padding-right: 20px; }
