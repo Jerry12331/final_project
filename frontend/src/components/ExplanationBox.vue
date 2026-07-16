@@ -139,8 +139,9 @@ async function submitQuestion() {
     }
 
     qaAskedQuestion.value = q;
-    qaAnswer.value = body.answer ?? "";
-    qaFromCache.value = !!body.fromCache;
+    // 後端 Program.cs 設定 PropertyNamingPolicy = null，JSON 欄位維持 C# 的 PascalCase（Answer / FromCache）
+    qaAnswer.value = body.Answer ?? "";
+    qaFromCache.value = !!body.FromCache;
     question.value = "";
   } catch (err) {
     qaError.value = "問題送出失敗：" + err.message;
