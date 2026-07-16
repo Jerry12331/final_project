@@ -223,7 +223,7 @@ namespace GKR_Backend.Services
 
                         if (!claimed.Equals(term)) { AddVerifierEvent("V: final check failed"); return; }
                         
-                        AddVerifierEvent("sum check passed, Verifier can trust D()", type: "SUMCHECK_PASS");
+                        AddVerifierEvent("sum check passed, Verifier can trust D()", type: "SUMCHECK_PASS_FINAL");
                         AddSystemEvent("GKR 驗證成功，執行 KZG 開放驗證...");
                         break;
                     }

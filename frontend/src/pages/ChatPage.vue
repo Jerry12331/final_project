@@ -318,7 +318,7 @@ const verificationFailed = computed(() =>
 
 const verificationSucceeded = computed(() =>
   !verificationFailed.value &&
-  flattenedRounds.value.some(r => r.type === 'SUMCHECK_PASS')
+  flattenedRounds.value.some(r => r.type === 'SUMCHECK_PASS_FINAL')
 );
 
 // ── 累積變數狀態：逐步合併到當前 step ─────────────────
