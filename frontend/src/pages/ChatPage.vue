@@ -406,7 +406,14 @@ const currentExplanation = computed(() => {
   // 查不到時 templates 為 null，交由 ExplanationBox 退回顯示上面寫死的 text / why
   const templates = templateKey && explanationTemplates[templateKey] ? explanationTemplates[templateKey] : null;
 
-  return { phase, text, why, variables, templates };
+  // 一併帶上目前步驟的原始資訊，讓 ExplanationBox 的自由提問功能可以送給後端 /api/ask_step
+  return {
+    phase, text, why, variables, templates,
+    stepType: step.type,
+    stepLayer: layerIdx,
+    stepRound: roundIdx,
+    stepData: step.data
+  };
 });
 </script>
 

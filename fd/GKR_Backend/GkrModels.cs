@@ -33,4 +33,19 @@ namespace GKR_Backend
     {
         public List<GkrEvent>? Log { get; set; }
     }
+
+    public class AskStepRequest
+    {
+        public string? Type { get; set; }
+        public int Layer { get; set; }
+        public int Round { get; set; }
+        public object? Data { get; set; }
+        public string? Question { get; set; }
+    }
+
+    public class AskStepResponse
+    {
+        public string? Answer { get; set; }
+        public bool FromCache { get; set; }
+    }
 }

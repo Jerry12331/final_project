@@ -29,11 +29,42 @@
         </li>
       </ul>
     </div>
+
+    <div class="qa-section">
+      <h4>還有其他問題嗎？</h4>
+      <div class="qa-input-row">
+        <input
+          v-model="question"
+          type="text"
+          placeholder="還有其他問題嗎？"
+          class="qa-input"
+          maxlength="200"
+          :disabled="asking"
+          @keyup.enter="submitQuestion"
+        />
+        <button
+          type="button"
+          class="qa-submit-btn"
+          :disabled="asking || !question.trim()"
+          @click="submitQuestion"
+        >{{ asking ? "送出中…" : "送出" }}</button>
+      </div>
+
+      <p v-if="qaError" class="qa-error">{{ qaError }}</p>
+
+      <div v-if="qaAnswer" class="qa-answer">
+        <div class="qa-question-echo">Q：{{ qaAskedQuestion }}</div>
+        <p class="qa-answer-text">
+          {{ qaAnswer }}
+          <span v-if="qaFromCache" class="qa-cache-badge">⚡ 快速回覆</span>
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 
 const props = defineProps({
   explanation: {
@@ -60,6 +91,63 @@ const displayText = computed(() => {
 const displayWhy = computed(() => {
   return props.explanation.templates ? "" : props.explanation.why;
 });
+
+// ── 自由提問：把目前步驟資訊 + 使用者問題送到後端 /api/ask_step ─────────────────
+const question = ref("");
+const asking = ref(false);
+const qaAnswer = ref("");
+const qaAskedQuestion = ref("");
+const qaFromCache = ref(false);
+const qaError = ref("");
+
+// 換到別的步驟時，把上一步留下的問答內容清掉，避免答非所問
+watch(
+  () => [props.explanation.stepType, props.explanation.stepLayer, props.explanation.stepRound],
+  () => {
+    question.value = "";
+    qaAnswer.value = "";
+    qaAskedQuestion.value = "";
+    qaFromCache.value = false;
+    qaError.value = "";
+  }
+);
+
+async function submitQuestion() {
+  const q = question.value.trim();
+  if (!q || asking.value) return;
+
+  asking.value = true;
+  qaError.value = "";
+
+  try {
+    const response = await fetch("http://localhost:5285/api/ask_step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: props.explanation.stepType ?? null,
+        layer: props.explanation.stepLayer ?? 0,
+        round: props.explanation.stepRound ?? 0,
+        data: props.explanation.stepData ?? null,
+        question: q
+      })
+    });
+
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(body?.error || `HTTP ${response.status}`);
+    }
+
+    qaAskedQuestion.value = q;
+    qaAnswer.value = body.answer ?? "";
+    qaFromCache.value = !!body.fromCache;
+    question.value = "";
+  } catch (err) {
+    qaError.value = "問題送出失敗：" + err.message;
+  } finally {
+    asking.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -174,6 +262,87 @@ const displayWhy = computed(() => {
   margin-bottom: 6px;
   line-height: 1.45;
   font-size: 13px;
+}
+
+.qa-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.qa-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.qa-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.qa-input:disabled {
+  background: #f3f4f6;
+}
+
+.qa-submit-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qa-submit-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.qa-submit-btn:disabled {
+  background: #93c5fd;
+  cursor: not-allowed;
+}
+
+.qa-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.qa-answer {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+}
+
+.qa-question-echo {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-bottom: 4px;
+}
+
+.qa-answer-text {
+  margin: 0;
+  font-size: 13px;
+  color: #1f2937;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.qa-cache-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  color: #a16207;
 }
 
 @media (max-width: 1100px) {

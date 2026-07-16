@@ -2,3 +2,10 @@ bin/
 obj/
 *.log
 *.user
+
+# appsettings.Development.json 常被用來放本機專屬設定，
+# ANTHROPIC_API_KEY 一律只能透過環境變數提供，不可以寫進這個檔案，
+# 但還是把它排除掉以防有人不小心放了金鑰進去
+appsettings.Development.json
+appsettings.*.local.json
+.env

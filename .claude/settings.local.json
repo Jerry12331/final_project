@@ -38,7 +38,8 @@
       "Bash(where.exe node *)",
       "Bash(where.exe npm.cmd)",
       "Bash(mkdir -p frontend/src/data)",
-      "Bash(mv explanation_templates.json frontend/src/data/explanation_templates.json)"
+      "Bash(mv explanation_templates.json frontend/src/data/explanation_templates.json)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

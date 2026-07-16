@@ -1,3 +1,5 @@
+using GKR_Backend.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -9,6 +11,10 @@ builder.Services.AddControllers()
     });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// AskStepService 內部維護記憶體快取與限流狀態，必須註冊成 Singleton 才能跨請求共用
+builder.Services.AddHttpClient("anthropic");
+builder.Services.AddSingleton<AskStepService>();
 
 // --- �s�W CORS �]�w ---
 builder.Services.AddCors(options =>
