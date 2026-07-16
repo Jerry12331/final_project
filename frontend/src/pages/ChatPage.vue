@@ -76,6 +76,7 @@ import { useRoute } from "vue-router";
 import CircuitCanvas from "../components/CircuitCanvas.vue";
 import ExplanationBox from "../components/ExplanationBox.vue";
 import VariablesPanel from "../components/VariablesPanel.vue";
+import explanationTemplates from "../data/explanation_templates.json";
 
 const route = useRoute();
 const currentStep = ref(0);
@@ -355,49 +356,57 @@ const currentActiveGates = computed(() => {
 
 const currentExplanation = computed(() => {
   const step = flattenedRounds.value[currentStep.value];
-  if (!step) return { phase: "載入中", text: "等待驗證流程資料載入中", why: "", variables: [] };
+  if (!step) return { phase: "載入中", text: "等待驗證流程資料載入中", why: "", variables: [], templates: null };
 
   const layerIdx = step.layer;
   const roundIdx = step.round;
 
+  let phase, text, why, variables, templateKey;
+
   switch (step.type) {
     case "SEND_RHO":
-      return {
-        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
-        text: "Verifier 送出隨機挑戰數 ρ（rho）給 Prover，要求對方回答多項式在此點的值。",
-        why: "隨機性讓 Prover 無法預先偽造答案。若 Prover 說謊，被挑穿的機率極高（由有限體大小決定）。",
-        variables: [{ name: "ρ (rho)", desc: `隨機挑戰點${step.data?.rho !== undefined ? `：${formatBigNum(String(step.data.rho))}` : ""}` }]
-      };
+      phase = `Layer ${layerIdx} · Round ${roundIdx}`;
+      text = "Verifier 送出隨機挑戰數 ρ（rho）給 Prover，要求對方回答多項式在此點的值。";
+      why = "隨機性讓 Prover 無法預先偽造答案。若 Prover 說謊，被挑穿的機率極高（由有限體大小決定）。";
+      variables = [{ name: "ρ (rho)", desc: `隨機挑戰點${step.data?.rho !== undefined ? `：${formatBigNum(String(step.data.rho))}` : ""}` }];
+      templateKey = "SEND_RHO";
+      break;
     case "SEND_S":
-      return {
-        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
-        text: "Verifier 選取隨機點 s，要求 Prover 提供下一層電路在 s 的求值，以便繼續驗證。",
-        why: "每一層都需要新的隨機點，形成一條從輸出層延伸到輸入層的驗證鏈，最終收斂於可公開驗證的輸入。",
-        variables: [{ name: "s", desc: `隨機測試點${step.data?.s !== undefined ? `：${formatBigNum(String(step.data.s))}` : ""}` }]
-      };
+      phase = `Layer ${layerIdx} · Round ${roundIdx}`;
+      text = "Verifier 選取隨機點 s，要求 Prover 提供下一層電路在 s 的求值，以便繼續驗證。";
+      why = "每一層都需要新的隨機點，形成一條從輸出層延伸到輸入層的驗證鏈，最終收斂於可公開驗證的輸入。";
+      variables = [{ name: "s", desc: `隨機測試點${step.data?.s !== undefined ? `：${formatBigNum(String(step.data.s))}` : ""}` }];
+      templateKey = "SEND_S";
+      break;
     case "CLAIM_VALUE":
-      return {
-        phase: `Layer ${layerIdx} · Round ${roundIdx}`,
-        text: "Prover 提出計算結果（Claim）。Verifier 將此結果與先前隨機挑戰進行一致性檢查。",
-        why: "若 Prover 提出的值與電路實際值不符，Sumcheck 協議會在後續步驟將矛盾揭穿，Prover 無法逃脫。",
-        variables: [{ name: "claimed value", desc: `Prover 宣稱的輸出${step.data?.claimed !== undefined ? `：${formatBigNum(String(step.data.claimed))}` : ""}` }]
-      };
+      phase = `Layer ${layerIdx} · Round ${roundIdx}`;
+      text = "Prover 提出計算結果（Claim）。Verifier 將此結果與先前隨機挑戰進行一致性檢查。";
+      why = "若 Prover 提出的值與電路實際值不符，Sumcheck 協議會在後續步驟將矛盾揭穿，Prover 無法逃脫。";
+      variables = [{ name: "claimed value", desc: `Prover 宣稱的輸出${step.data?.claimed !== undefined ? `：${formatBigNum(String(step.data.claimed))}` : ""}` }];
+      templateKey = "CLAIM_VALUE";
+      break;
     default:
       if (roundIdx === 1 && layerIdx === 0) {
-        return {
-          phase: "GKR 驗證啟動",
-          text: "Prover 宣告電路的輸出值，GKR 協議正式開始。Verifier 將從輸出層逐層向下驗證到輸入層。",
-          why: "GKR 協議的核心是把「電路計算的正確性」轉化為「一系列多項式求和問題」，讓驗證計算量大幅縮短。",
-          variables: []
-        };
+        phase = "GKR 驗證啟動";
+        text = "Prover 宣告電路的輸出值，GKR 協議正式開始。Verifier 將從輸出層逐層向下驗證到輸入層。";
+        why = "GKR 協議的核心是把「電路計算的正確性」轉化為「一系列多項式求和問題」，讓驗證計算量大幅縮短。";
+        variables = [];
+        templateKey = "OPENING";
+      } else {
+        phase = `Layer ${layerIdx} · Sumcheck Round ${roundIdx}`;
+        text = `Prover 與 Verifier 正在執行第 ${layerIdx} 層的 Sumcheck 協議第 ${roundIdx} 輪。Prover 逐步證明多項式求和正確，Verifier 逐步驗證一致性。`;
+        why = "Sumcheck 協議讓 Verifier 只需驗證少量點的值，就能確認整個多項式求和正確，大幅降低驗證計算量。";
+        variables = [];
+        // 非 opening 的一般步驟，直接用後端回傳的 type（例如 SUMCHECK_PASS、SUMCHECK_PASS_FINAL）查表
+        templateKey = step.type;
       }
-      return {
-        phase: `Layer ${layerIdx} · Sumcheck Round ${roundIdx}`,
-        text: `Prover 與 Verifier 正在執行第 ${layerIdx} 層的 Sumcheck 協議第 ${roundIdx} 輪。Prover 逐步證明多項式求和正確，Verifier 逐步驗證一致性。`,
-        why: "Sumcheck 協議讓 Verifier 只需驗證少量點的值，就能確認整個多項式求和正確，大幅降低驗證計算量。",
-        variables: []
-      };
   }
+
+  // 查表取得該事件類型的 brief / standard / detailed 三種說明文字
+  // 查不到時 templates 為 null，交由 ExplanationBox 退回顯示上面寫死的 text / why
+  const templates = templateKey && explanationTemplates[templateKey] ? explanationTemplates[templateKey] : null;
+
+  return { phase, text, why, variables, templates };
 });
 </script>
 

@@ -2,12 +2,23 @@
   <div class="explanation-box">
     <div v-if="explanation.phase" class="phase-badge">{{ explanation.phase }}</div>
 
-    <h3>現在在做什麼？</h3>
-    <p class="main-text">{{ explanation.text }}</p>
+    <div v-if="explanation.templates" class="level-switch">
+      <button
+        v-for="opt in levelOptions"
+        :key="opt.value"
+        type="button"
+        class="level-btn"
+        :class="{ active: level === opt.value }"
+        @click="level = opt.value"
+      >{{ opt.label }}</button>
+    </div>
 
-    <div v-if="explanation.why" class="why-section">
+    <h3>現在在做什麼？</h3>
+    <p class="main-text">{{ displayText }}</p>
+
+    <div v-if="displayWhy" class="why-section">
       <h4>為什麼要做這步？</h4>
-      <p class="why-text">{{ explanation.why }}</p>
+      <p class="why-text">{{ displayWhy }}</p>
     </div>
 
     <div v-if="explanation.variables?.length">
@@ -22,11 +33,32 @@
 </template>
 
 <script setup>
-defineProps({
+import { ref, computed } from "vue";
+
+const props = defineProps({
   explanation: {
     type: Object,
     required: true
   }
+});
+
+const levelOptions = [
+  { value: "brief", label: "簡短" },
+  { value: "standard", label: "標準" },
+  { value: "detailed", label: "詳細" }
+];
+
+const level = ref("standard");
+
+// 有查到 json 範本時依詳細程度顯示對應文字，查不到就退回原本寫死的 text
+const displayText = computed(() => {
+  const templates = props.explanation.templates;
+  return templates?.[level.value] ?? props.explanation.text;
+});
+
+// json 範本的文字本身已經包含「為什麼」，所以只有退回寫死文字時才需要另外顯示 why 區塊
+const displayWhy = computed(() => {
+  return props.explanation.templates ? "" : props.explanation.why;
 });
 </script>
 
@@ -68,6 +100,36 @@ defineProps({
   margin-bottom: 10px;
   line-height: 1.6;
   color: #1f2937;
+  white-space: pre-line;
+}
+
+.level-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.level-btn {
+  flex: 1;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.level-btn:hover {
+  background: #e5e7eb;
+}
+
+.level-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
 }
 
 .why-section {

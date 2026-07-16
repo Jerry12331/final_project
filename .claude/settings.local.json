@@ -31,7 +31,14 @@
       "Bash(python -c ' *)",
       "Bash(node -e ' *)",
       "Read(//c/Users/User/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6c35dab0-1907-458f-a853-6a33b06b2501/21135b10-f743-4e21-8e43-1f1e5588a39b/skills/pptx/**)",
-      "Bash(python scripts/extract-text.py \"C:\\\\Users\\\\User\\\\Desktop\\\\自然語言模型proposal\\\\proposal.pptx\")"
+      "Bash(python scripts/extract-text.py \"C:\\\\Users\\\\User\\\\Desktop\\\\自然語言模型proposal\\\\proposal.pptx\")",
+      "Bash(powershell -Command '$env:PATH = [System.Environment]::GetEnvironmentVariable\\('\\\\''PATH'\\\\'','\\\\''Machine'\\\\''\\) + '\\\\'';'\\\\'' + [System.Environment]::GetEnvironmentVariable\\('\\\\''PATH'\\\\'','\\\\''User'\\\\''\\); npm run dev')",
+      "Bash(cmd /c \"npm run dev\")",
+      "Bash(where.exe npm *)",
+      "Bash(where.exe node *)",
+      "Bash(where.exe npm.cmd)",
+      "Bash(mkdir -p frontend/src/data)",
+      "Bash(mv explanation_templates.json frontend/src/data/explanation_templates.json)"
     ]
   }
 }
