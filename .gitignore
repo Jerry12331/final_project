@@ -1,0 +1,4 @@
+# 環境變數與敏感資訊(API Key 等)
+.env
+.env.local
+*.env
